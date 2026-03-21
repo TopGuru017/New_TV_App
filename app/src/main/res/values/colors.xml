@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="background_gradient_start">#000000</color>
     <color name="background_gradient_end">#DDDDDD</color>
@@ -18,4 +19,10 @@
     <color name="profile_label_cyan">#00ADEF</color>
     <color name="profile_status_active">#4CAF50</color>
     <color name="profile_status_inactive">#FF9800</color>
+
+    <!-- Settings (in-app screen) -->
+    <color name="settings_panel_background">#141414</color>
+    <color name="settings_nav_background">#0E0E0E</color>
+    <color name="settings_section_title">#9E9E9E</color>
+    <color name="settings_card_stroke">#00BCD4</color>
 </resources>

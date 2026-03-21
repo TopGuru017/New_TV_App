@@ -43,6 +43,12 @@ class MainActivity : FragmentActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+        sidebar.setOnSettingsClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, SettingsFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, HomeContentFragment())

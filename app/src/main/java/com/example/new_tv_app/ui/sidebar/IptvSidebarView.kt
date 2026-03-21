@@ -142,6 +142,10 @@ class IptvSidebarView @JvmOverloads constructor(
         rowLive.setOnClickListener(listener)
     }
 
+    fun setOnSettingsClickListener(listener: OnClickListener?) {
+        rowSettings.setOnClickListener(listener)
+    }
+
     fun setOnVodMoviesClickListener(listener: OnClickListener?) {
         findViewById<TextView>(R.id.row_vod_movies).setOnClickListener(listener)
     }

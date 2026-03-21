@@ -84,4 +84,38 @@
     <string name="vod_badge_movie">Movie</string>
     <string name="vod_badge_series">Series</string>
     <string name="vod_series_episode_error">Could not open episode list for this series.</string>
+
+    <!-- Settings (in-app) -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_nav_general">General</string>
+    <string name="settings_nav_display">Display</string>
+    <string name="settings_nav_live">Live</string>
+    <string name="settings_nav_manage_devices">Manage devices</string>
+    <string name="settings_nav_speed_test">Speed test</string>
+    <string name="settings_nav_live_support">Live support</string>
+    <string name="settings_nav_log_out">Log out</string>
+    <string name="settings_section_language">Language</string>
+    <string name="settings_language_hebrew">Hebrew / עברית</string>
+    <string name="settings_language_english">English / אנגלית</string>
+    <string name="settings_section_records_order">Records order</string>
+    <string name="settings_records_new_to_old">New to old</string>
+    <string name="settings_records_old_to_new">Old to new</string>
+    <string name="settings_section_update_notifications">Update notifications</string>
+    <string name="settings_section_storage">Storage &amp; cache</string>
+    <string name="settings_cache_size_fmt">Cache size: %1$s</string>
+    <string name="settings_storage_summary_fmt">Total space: %1$s, free: %2$s</string>
+    <string name="settings_storage_unknown">Unknown</string>
+    <string name="settings_clear_cache">Clear cache</string>
+    <string name="settings_cache_cleared">Cache cleared</string>
+    <string name="settings_build_fmt">Build: %1$s, %2$s (%3$d)</string>
+    <string name="settings_panel_display_body">Display options (resolution, HDR, overscan) will be available here.</string>
+    <string name="settings_panel_live_body">Live TV defaults (buffer, start channel) will be available here.</string>
+    <string name="settings_panel_devices_body">Registered devices and session limits will be listed here.</string>
+    <string name="settings_panel_speed_body">Network speed test will run from this section.</string>
+    <string name="settings_panel_support_body">Contact support and help articles will open from here.</string>
+    <string name="settings_panel_logout_body">Press OK on “Log out” in the list, or use the button below.</string>
+    <string name="settings_logout_confirm_title">Log out</string>
+    <string name="settings_logout_confirm_message">Exit the app?</string>
+    <string name="settings_logout_confirm_yes">Yes</string>
+    <string name="settings_logout_confirm_cancel">Cancel</string>
 </resources>
