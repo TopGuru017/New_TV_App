@@ -1,0 +1,16 @@
+<resources>
+    <color name="background_gradient_start">#000000</color>
+    <color name="background_gradient_end">#DDDDDD</color>
+    <color name="fastlane_background">#0096a6</color>
+    <color name="search_opaque">#ffaa3f</color>
+    <color name="selected_background">#ffaa3f</color>
+    <color name="default_background">#3d3d3d</color>
+
+    <color name="sidebar_background">#121212</color>
+    <color name="sidebar_text_primary">#FFFFFF</color>
+    <color name="sidebar_text_muted">#808080</color>
+    <color name="sidebar_accent_cyan">#00BCD4</color>
+    <color name="sidebar_row_focus_background">#2C2C2C</color>
+    <color name="sidebar_live_chip_stroke">#B0B0B0</color>
+    <color name="content_background">#000000</color>
+</resources>

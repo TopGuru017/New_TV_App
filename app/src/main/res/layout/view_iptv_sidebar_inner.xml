@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:clipToPadding="false"
+    android:fillViewport="true"
+    android:overScrollMode="never"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingTop="12dp"
+        android:paddingBottom="10dp">
+
+        <!-- Brand + logo: SDAROT + sdarotv_logo.png (fits inside fixed slot so small PNGs still show) -->
+        <LinearLayout
+            android:id="@+id/sidebar_logo_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding"
+            android:paddingBottom="10dp">
+
+            <TextView
+                android:id="@+id/sidebar_brand_sdarot"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="@dimen/sidebar_brand_logo_spacing"
+                android:letterSpacing="0.04"
+                android:text="@string/sidebar_brand_sdarot"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <FrameLayout
+                android:id="@+id/sidebar_logo_slot"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/sidebar_logo_size"
+                android:layout_weight="1"
+                android:background="@android:color/transparent"
+                android:minWidth="@dimen/sidebar_logo_image_min_width">
+
+                <ImageView
+                    android:id="@+id/sidebar_app_logo"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:contentDescription="@string/sidebar_logo_content_description"
+                    android:padding="2dp"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/sdarotv_logo" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- Profile (focusable like nav rows) -->
+        <LinearLayout
+            android:id="@+id/sidebar_profile_row"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <FrameLayout
+                android:id="@+id/sidebar_profile_avatar"
+                android:layout_width="@dimen/sidebar_profile_avatar_size"
+                android:layout_height="@dimen/sidebar_profile_avatar_size"
+                android:background="@drawable/bg_avatar_circle"
+                android:duplicateParentState="true">
+
+                <TextView
+                    android:id="@+id/sidebar_profile_initial"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:duplicateParentState="true"
+                    android:gravity="center"
+                    android:textColor="@color/sidebar_text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/sidebar_profile_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:duplicateParentState="true"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/profile_display_name"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Nav: Search -->
+        <LinearLayout
+            android:id="@+id/row_search"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_search" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_search"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Favorites -->
+        <LinearLayout
+            android:id="@+id/row_favorites"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_favorite" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_favorites"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Last watch -->
+        <LinearLayout
+            android:id="@+id/row_last_watch"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_history" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_last_watch"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- TV Guide -->
+        <LinearLayout
+            android:id="@+id/row_tv_guide"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_tv_guide" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_tv_guide"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Live -->
+        <LinearLayout
+            android:id="@+id/row_live"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_live_chip"
+                android:gravity="center"
+                android:minWidth="32dp"
+                android:minHeight="18dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:text="@string/sidebar_live"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="8sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/row_live_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_live"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Records -->
+        <LinearLayout
+            android:id="@+id/row_records"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_records" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_records"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- VOD -->
+        <LinearLayout
+            android:id="@+id/row_vod"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_vod" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_vod"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+
+            <ImageView
+                android:id="@+id/sidebar_vod_chevron"
+                android:layout_width="@dimen/sidebar_vod_chevron_size"
+                android:layout_height="@dimen/sidebar_vod_chevron_size"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_sidebar_chevron_down" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/sidebar_vod_submenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="@dimen/sidebar_vod_submenu_margin_bottom"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:id="@+id/row_vod_series"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/sidebar_row_height"
+                android:background="@drawable/bg_sidebar_item"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:paddingStart="@dimen/sidebar_submenu_start_padding"
+                android:paddingEnd="@dimen/sidebar_horizontal_padding"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_vod_series"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/row_vod_movies"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/sidebar_row_height"
+                android:background="@drawable/bg_sidebar_item"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:paddingStart="@dimen/sidebar_submenu_start_padding"
+                android:paddingEnd="@dimen/sidebar_horizontal_padding"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_vod_movies"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Extra gap so VOD submenu + footer (settings, clock) stay comfortably separated when open -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_gap_vod_to_settings"
+            android:focusable="false"
+            android:importantForAccessibility="no" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:focusable="false" />
+
+        <!-- Settings -->
+        <LinearLayout
+            android:id="@+id/row_settings"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/sidebar_row_height"
+            android:background="@drawable/bg_sidebar_item"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding">
+
+            <ImageView
+                android:layout_width="@dimen/sidebar_nav_icon_size"
+                android:layout_height="@dimen/sidebar_nav_icon_size"
+                android:contentDescription="@null"
+                android:duplicateParentState="true"
+                android:src="@drawable/ic_sidebar_settings" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/sidebar_nav_icon_text_gap"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/sidebar_settings"
+                android:textAllCaps="true"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Clock only (no locale icon) -->
+        <LinearLayout
+            android:id="@+id/sidebar_footer_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/sidebar_horizontal_padding"
+            android:paddingEnd="@dimen/sidebar_horizontal_padding"
+            android:paddingTop="8dp">
+
+            <TextView
+                android:id="@+id/sidebar_clock"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="11sp"
+                tools:text="10:12 Saturday" />
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

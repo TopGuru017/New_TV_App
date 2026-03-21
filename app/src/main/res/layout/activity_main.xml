@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity"
+    tools:deviceIds="tv">
+
+    <!-- Full-width IPTV content; sidebar draws on top when expanded -->
+    <FrameLayout
+        android:id="@+id/main_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/content_background"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+    <com.example.new_tv_app.ui.sidebar.IptvSidebarView
+        android:id="@+id/iptv_sidebar"
+        android:layout_width="@dimen/sidebar_width_expanded"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:clipToPadding="false"
+        android:descendantFocusability="afterDescendants"
+        android:elevation="8dp"
+        android:focusable="false" />
+</FrameLayout>

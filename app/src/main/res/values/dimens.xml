@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="sidebar_width_expanded">220dp</dimen>
+    <dimen name="sidebar_width_collapsed">76dp</dimen>
+    <dimen name="sidebar_nav_icon_size">20dp</dimen>
+    <dimen name="sidebar_row_height">36dp</dimen>
+    <dimen name="sidebar_horizontal_padding">10dp</dimen>
+    <dimen name="sidebar_submenu_start_padding">36dp</dimen>
+    <dimen name="sidebar_nav_icon_text_gap">8dp</dimen>
+    <dimen name="sidebar_brand_logo_spacing">4dp</dimen>
+    <dimen name="sidebar_profile_avatar_size">30dp</dimen>
+    <!-- Logo slot: same height in expanded and collapsed rail -->
+    <dimen name="sidebar_logo_size">32dp</dimen>
+    <dimen name="sidebar_logo_image_min_width">52dp</dimen>
+    <dimen name="sidebar_gap_vod_to_settings">40dp</dimen>
+    <dimen name="sidebar_vod_submenu_margin_bottom">8dp</dimen>
+    <dimen name="sidebar_vod_chevron_size">16dp</dimen>
+</resources>
