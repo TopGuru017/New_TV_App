@@ -115,7 +115,25 @@
     <string name="settings_panel_support_body">Contact support and help articles will open from here.</string>
     <string name="settings_panel_logout_body">Press OK on “Log out” in the list, or use the button below.</string>
     <string name="settings_logout_confirm_title">Log out</string>
-    <string name="settings_logout_confirm_message">Exit the app?</string>
+    <string name="settings_logout_confirm_message">Sign out and return to the login screen?</string>
     <string name="settings_logout_confirm_yes">Yes</string>
     <string name="settings_logout_confirm_cancel">Cancel</string>
+
+    <!-- Login -->
+    <string name="login_hello">Hello! Welcome to</string>
+    <string name="login_brand_israel">ISRAEL</string>
+    <string name="login_brand_tv">TV</string>
+    <string name="login_subtitle">Please sign in to your account.</string>
+    <string name="login_username_hint">Username</string>
+    <string name="login_password_hint">Password</string>
+    <string name="login_button">Login</string>
+    <string name="login_qr">Login with QR code</string>
+    <string name="login_reset_password">Reset password</string>
+    <string name="login_error_empty">Enter username and password.</string>
+    <string name="login_error_failed">Sign-in failed. Check your credentials.</string>
+    <string name="login_lang_hebrew">Hebrew</string>
+    <string name="login_lang_english">English</string>
+    <string name="login_build_fmt">Build: %1$s, %2$s (%3$d)</string>
+    <string name="login_qr_toast">QR login is not available yet.</string>
+    <string name="login_reset_toast">Use your provider’s site to reset your password.</string>
 </resources>

@@ -14,6 +14,7 @@
         android:id="@+id/settings_screen_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:focusable="false"
         android:text="@string/settings_title"
         android:textColor="@color/sidebar_text_primary"
         android:textSize="28sp"
@@ -35,7 +36,7 @@
             android:overScrollMode="never"
             android:scrollbars="none">
 
-            <LinearLayout
+            <com.example.new_tv_app.ui.FocusColumnLayout
                 android:id="@+id/settings_nav_column"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -70,8 +71,9 @@
 
                 <include
                     android:id="@+id/nav_log_out"
+                    android:layout_marginTop="24dp"
                     layout="@layout/item_settings_nav" />
-            </LinearLayout>
+            </com.example.new_tv_app.ui.FocusColumnLayout>
         </ScrollView>
 
         <View
@@ -79,7 +81,7 @@
             android:layout_height="match_parent"
             android:background="#28FFFFFF" />
 
-        <FrameLayout
+        <com.example.new_tv_app.ui.FocusDetailColumnLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
@@ -91,7 +93,7 @@
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
                 android:fillViewport="true"
-                android:focusable="true"
+                android:focusable="false"
                 android:padding="@dimen/settings_content_padding"
                 android:scrollbars="none">
 
@@ -358,15 +360,36 @@
                 android:padding="@dimen/settings_content_padding"
                 android:visibility="gone">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/settings_panel_logout_body"
-                    android:textColor="@color/sidebar_text_primary"
-                    android:textSize="15sp" />
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:lineSpacingExtra="4dp"
+                        android:text="@string/settings_panel_logout_body"
+                        android:textColor="@color/sidebar_text_primary"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:id="@+id/settings_logout_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:background="@drawable/bg_settings_option_selected"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:minHeight="48dp"
+                        android:paddingStart="24dp"
+                        android:paddingEnd="24dp"
+                        android:text="@string/settings_nav_log_out"
+                        android:textColor="@color/sidebar_text_primary"
+                        android:textSize="14sp" />
+                </LinearLayout>
             </ScrollView>
-        </FrameLayout>
+        </com.example.new_tv_app.ui.FocusDetailColumnLayout>
     </LinearLayout>
 
     <TextView
@@ -375,6 +398,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end"
         android:layout_marginTop="8dp"
+        android:focusable="false"
         android:textColor="@color/sidebar_text_muted"
         android:textSize="11sp"
         tools:text="Build: …" />

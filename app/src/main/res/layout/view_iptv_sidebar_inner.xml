@@ -8,9 +8,9 @@
     android:overScrollMode="never"
     android:scrollbars="none">
 
-    <LinearLayout
+    <com.example.new_tv_app.ui.FocusColumnLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingTop="12dp"
         android:paddingBottom="10dp">
@@ -448,5 +448,5 @@
                 android:textSize="11sp"
                 tools:text="10:12 Saturday" />
         </LinearLayout>
-    </LinearLayout>
+    </com.example.new_tv_app.ui.FocusColumnLayout>
 </ScrollView>

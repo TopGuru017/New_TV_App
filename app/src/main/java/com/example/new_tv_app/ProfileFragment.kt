@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import com.example.new_tv_app.iptv.IptvCredentials
 import com.example.new_tv_app.iptv.PlayerAccount
 import com.example.new_tv_app.iptv.PlayerApiFetcher
 import kotlinx.coroutines.launch
@@ -75,9 +76,9 @@ class ProfileFragment : Fragment() {
                     validUntil.text = na
                     daysRemaining.text = ""
                     memberSince.text = na
-                    siteUrl.text = BuildConfig.IPTV_BASE_URL
+                    siteUrl.text = IptvCredentials.baseUrl()
                     siteUrl.setOnClickListener {
-                        openUrl(BuildConfig.IPTV_BASE_URL)
+                        openUrl(IptvCredentials.baseUrl())
                     }
                 }
             )

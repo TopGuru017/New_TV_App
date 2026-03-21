@@ -1,6 +1,5 @@
 package com.example.new_tv_app.iptv
 
-import com.example.new_tv_app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -13,9 +12,9 @@ object PlayerApiFetcher {
 
     suspend fun fetchAccount(): Result<PlayerAccount> = withContext(Dispatchers.IO) {
         runCatching {
-            val base = BuildConfig.IPTV_BASE_URL.trimEnd('/')
-            val u = URLEncoder.encode(BuildConfig.IPTV_USERNAME, StandardCharsets.UTF_8.name())
-            val p = URLEncoder.encode(BuildConfig.IPTV_PASSWORD, StandardCharsets.UTF_8.name())
+            val base = IptvCredentials.baseUrl()
+            val u = URLEncoder.encode(IptvCredentials.usernameRaw(), StandardCharsets.UTF_8.name())
+            val p = URLEncoder.encode(IptvCredentials.passwordRaw(), StandardCharsets.UTF_8.name())
             val apiUrl = "$base/player_api.php?username=$u&password=$p"
             val conn = URL(apiUrl).openConnection() as HttpURLConnection
             conn.connectTimeout = 20_000
@@ -51,7 +50,7 @@ object PlayerApiFetcher {
         }
 
         val serverUrl = server.optString("url", "").ifBlank {
-            BuildConfig.IPTV_BASE_URL
+            IptvCredentials.baseUrl()
                 .removePrefix("https://")
                 .removePrefix("http://")
                 .substringBefore("/")

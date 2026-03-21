@@ -1,6 +1,5 @@
 package com.example.new_tv_app.iptv
 
-import com.example.new_tv_app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -38,9 +37,9 @@ object XtreamLiveApi {
     }
 
     private fun get(action: String, vararg extra: Pair<String, String>): String {
-        val base = BuildConfig.IPTV_BASE_URL.trimEnd('/')
-        val u = URLEncoder.encode(BuildConfig.IPTV_USERNAME, StandardCharsets.UTF_8.name())
-        val p = URLEncoder.encode(BuildConfig.IPTV_PASSWORD, StandardCharsets.UTF_8.name())
+        val base = IptvCredentials.baseUrl()
+        val u = URLEncoder.encode(IptvCredentials.usernameRaw(), StandardCharsets.UTF_8.name())
+        val p = URLEncoder.encode(IptvCredentials.passwordRaw(), StandardCharsets.UTF_8.name())
         val sb = StringBuilder("$base/player_api.php?username=$u&password=$p")
         sb.append("&action=").append(URLEncoder.encode(action, StandardCharsets.UTF_8.name()))
         for ((k, v) in extra) {

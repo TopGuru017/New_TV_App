@@ -2,6 +2,7 @@ package com.example.new_tv_app
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.os.StatFs
 import android.text.format.Formatter
@@ -13,9 +14,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
 import com.example.new_tv_app.databinding.FragmentSettingsBinding
+import com.example.new_tv_app.iptv.IptvCredentials
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -34,6 +34,9 @@ class SettingsFragment : Fragment() {
     private lateinit var panels: List<ScrollView>
     private var selectedNavIndex = 0
 
+    /** Restored when leaving Settings so the rail returns to “content” on RIGHT. */
+    private var savedRowSettingsNextRight: Int = View.NO_ID
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -46,16 +49,8 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        val mainContent = requireActivity().findViewById<View>(R.id.main_content)
-        val savedNextLeft = mainContent.nextFocusLeftId
-        mainContent.nextFocusLeftId = View.NO_ID
-        viewLifecycleOwner.lifecycle.addObserver(
-            object : DefaultLifecycleObserver {
-                override fun onDestroy(owner: LifecycleOwner) {
-                    mainContent.nextFocusLeftId = savedNextLeft
-                }
-            },
-        )
+        val rowSettings = requireActivity().findViewById<View>(R.id.row_settings)
+        savedRowSettingsNextRight = rowSettings.nextFocusRightId
 
         val root = binding.root
         navRows = listOf(
@@ -145,14 +140,21 @@ class SettingsFragment : Fragment() {
             }
         }
 
-        binding.settingsPanelDisplay.apply {
-            getChildAt(0).isFocusable = true
-        }
+        binding.settingsPanelDisplay.getChildAt(0).isFocusable = true
         binding.settingsPanelLive.getChildAt(0).isFocusable = true
         binding.settingsPanelDevices.getChildAt(0).isFocusable = true
         binding.settingsPanelSpeed.getChildAt(0).isFocusable = true
         binding.settingsPanelSupport.getChildAt(0).isFocusable = true
-        binding.settingsPanelLogout.getChildAt(0).isFocusable = true
+
+        binding.settingsLogoutButton.setOnClickListener { showLogoutDialog() }
+        binding.settingsLogoutButton.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
+            ) {
+                showLogoutDialog()
+                true
+            } else false
+        }
 
         selectNav(savedInstanceState?.getInt(STATE_NAV_INDEX) ?: 0)
         navRows[0].post { navRows[0].requestFocus() }
@@ -164,6 +166,9 @@ class SettingsFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        activity?.findViewById<View>(R.id.row_settings)?.let { row ->
+            row.nextFocusRightId = savedRowSettingsNextRight
+        }
         super.onDestroyView()
         _binding = null
     }
@@ -171,6 +176,24 @@ class SettingsFragment : Fragment() {
     private fun bindNavRow(row: View, iconRes: Int, labelRes: Int) {
         row.findViewById<android.widget.ImageView>(R.id.settings_nav_icon).setImageResource(iconRes)
         row.findViewById<TextView>(R.id.settings_nav_label).setText(labelRes)
+    }
+
+    private fun firstFocusInActivePanel(): View = when (selectedNavIndex) {
+        0 -> binding.settingsLangHebrew
+        1 -> binding.settingsPanelDisplay.getChildAt(0) as TextView
+        2 -> binding.settingsPanelLive.getChildAt(0) as TextView
+        3 -> binding.settingsPanelDevices.getChildAt(0) as TextView
+        4 -> binding.settingsPanelSpeed.getChildAt(0) as TextView
+        5 -> binding.settingsPanelSupport.getChildAt(0) as TextView
+        else -> binding.settingsLogoutButton
+    }
+
+    private fun updateHorizontalFocusChain() {
+        val rowSettings = requireActivity().findViewById<View>(R.id.row_settings)
+        rowSettings.nextFocusRightId = navRows[selectedNavIndex].id
+
+        val contentFirst = firstFocusInActivePanel()
+        navRows.forEach { it.nextFocusRightId = contentFirst.id }
     }
 
     private fun selectNav(index: Int) {
@@ -202,7 +225,9 @@ class SettingsFragment : Fragment() {
         (binding.settingsPanelDevices.getChildAt(0) as TextView).nextFocusLeftId = navId
         (binding.settingsPanelSpeed.getChildAt(0) as TextView).nextFocusLeftId = navId
         (binding.settingsPanelSupport.getChildAt(0) as TextView).nextFocusLeftId = navId
-        (binding.settingsPanelLogout.getChildAt(0) as TextView).nextFocusLeftId = navId
+        binding.settingsLogoutButton.nextFocusLeftId = navId
+
+        updateHorizontalFocusChain()
     }
 
     private fun applyLanguageUi(code: String) {
@@ -266,6 +291,12 @@ class SettingsFragment : Fragment() {
             .setTitle(R.string.settings_logout_confirm_title)
             .setMessage(R.string.settings_logout_confirm_message)
             .setPositiveButton(R.string.settings_logout_confirm_yes) { _, _ ->
+                IptvCredentials.clear()
+                startActivity(
+                    Intent(requireContext(), LoginActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    },
+                )
                 requireActivity().finish()
             }
             .setNegativeButton(R.string.settings_logout_confirm_cancel, null)

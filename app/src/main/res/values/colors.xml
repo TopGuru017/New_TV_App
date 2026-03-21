@@ -25,4 +25,6 @@
     <color name="settings_nav_background">#0E0E0E</color>
     <color name="settings_section_title">#9E9E9E</color>
     <color name="settings_card_stroke">#00BCD4</color>
+
+    <color name="login_scrim">#B3000000</color>
 </resources>

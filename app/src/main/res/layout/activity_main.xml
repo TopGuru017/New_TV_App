@@ -12,8 +12,9 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/content_background"
-        android:focusable="true"
-        android:focusableInTouchMode="true" />
+        android:descendantFocusability="afterDescendants"
+        android:focusable="false"
+        android:focusableInTouchMode="false" />
 
     <com.example.new_tv_app.ui.sidebar.IptvSidebarView
         android:id="@+id/iptv_sidebar"

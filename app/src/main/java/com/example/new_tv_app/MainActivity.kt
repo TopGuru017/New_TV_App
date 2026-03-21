@@ -3,6 +3,7 @@ package com.example.new_tv_app
 import android.os.Bundle
 import android.view.View
 import androidx.fragment.app.FragmentActivity
+import com.example.new_tv_app.iptv.IptvCredentials
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import java.util.Locale
 
@@ -18,7 +19,10 @@ class MainActivity : FragmentActivity() {
         val mainContent = findViewById<View>(R.id.main_content)
         val root = window.decorView.findViewById<View>(android.R.id.content)
         sidebar.attachAutoExpandCollapse(root, mainContent)
-        sidebar.setProfileDisplayName(BuildConfig.IPTV_USERNAME.uppercase(Locale.getDefault()))
+        val displayName = IptvCredentials.usernameRaw().trim().ifEmpty {
+            getString(R.string.profile_display_name)
+        }
+        sidebar.setProfileDisplayName(displayName.uppercase(Locale.getDefault()))
         sidebar.setOnLiveClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, LiveTvFragment())
@@ -50,9 +54,18 @@ class MainActivity : FragmentActivity() {
                 .commit()
         }
         if (savedInstanceState == null) {
+            val openLive = intent.getBooleanExtra(EXTRA_OPEN_LIVE, false)
+            val initial = if (openLive) LiveTvFragment() else HomeContentFragment()
             supportFragmentManager.beginTransaction()
-                .replace(R.id.main_content, HomeContentFragment())
+                .replace(R.id.main_content, initial)
                 .commitNow()
+            if (openLive) {
+                intent.removeExtra(EXTRA_OPEN_LIVE)
+            }
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_LIVE = "open_live"
     }
 }

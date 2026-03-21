@@ -184,16 +184,20 @@ class LiveTvFragment : Fragment() {
         )
 
         fun requestFocusFirstChannel() {
-            channelsRv.post {
-                val h = channelsRv.findViewHolderForAdapterPosition(0)
-                if (h != null) {
-                    h.itemView.requestFocus()
-                } else {
-                    channelsRv.post {
-                        channelsRv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+            if (channelAdapter.itemCount <= 0) return
+            requireActivity().findViewById<View>(R.id.main_content).clearFocus()
+            channelsRv.scrollToPosition(0)
+            fun tryFocus(attempt: Int) {
+                channelsRv.post {
+                    val h = channelsRv.findViewHolderForAdapterPosition(0)
+                    if (h != null) {
+                        h.itemView.requestFocus()
+                    } else if (attempt < 16) {
+                        channelsRv.postDelayed({ tryFocus(attempt + 1) }, 24L)
                     }
                 }
             }
+            tryFocus(0)
         }
 
         fun scheduleLoadStreams(cat: LiveCategory) {
