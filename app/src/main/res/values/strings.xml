@@ -76,4 +76,12 @@
     <string name="live_ends_in_hours_minutes">Ends in %1$d hours and %2$d minutes</string>
     <string name="live_ends_in_minutes">Ends in %1$d minutes</string>
     <string name="live_ends_soon">Ends soon</string>
+
+    <!-- VOD (movies / series) -->
+    <string name="vod_empty_select">Focus an item to see details</string>
+    <string name="vod_empty_items">Nothing in this category</string>
+    <string name="vod_load_error">Could not load VOD. Check connection.</string>
+    <string name="vod_badge_movie">Movie</string>
+    <string name="vod_badge_series">Series</string>
+    <string name="vod_series_episode_error">Could not open episode list for this series.</string>
 </resources>

@@ -25,6 +25,18 @@ class MainActivity : FragmentActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+        sidebar.setOnVodMoviesClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, VodBrowseFragment.newInstance(VodBrowseFragment.MODE_MOVIES))
+                .addToBackStack(null)
+                .commit()
+        }
+        sidebar.setOnVodSeriesClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, VodBrowseFragment.newInstance(VodBrowseFragment.MODE_SERIES))
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnProfileClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, ProfileFragment())
