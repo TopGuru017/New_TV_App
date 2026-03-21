@@ -6,7 +6,7 @@
     tools:context=".MainActivity"
     tools:deviceIds="tv">
 
-    <!-- Full-width IPTV content; sidebar draws on top when expanded -->
+    <!-- Content always has marginStart = collapsed rail width (fixed IPTV width); expanded rail overlaps that strip. -->
     <FrameLayout
         android:id="@+id/main_content"
         android:layout_width="match_parent"

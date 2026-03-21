@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/content_background"
+    android:paddingStart="40dp"
+    android:paddingTop="32dp"
+    android:paddingEnd="40dp"
+    android:paddingBottom="32dp">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:overScrollMode="never"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="28dp"
+                android:text="@string/profile_screen_title"
+                android:textColor="@color/sidebar_text_primary"
+                android:textSize="28sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/profile_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:textColor="#EF5350"
+                android:textSize="14sp"
+                android:visibility="gone"
+                tools:text="@string/profile_load_error"
+                tools:visibility="visible" />
+
+            <ProgressBar
+                android:id="@+id/profile_progress"
+                style="?android:attr/progressBarStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <!-- Left column: user details -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="24dp"
+                    android:layout_weight="4"
+                    android:orientation="vertical">
+
+                    <!-- Full name -->
+                    <LinearLayout
+                        style="@style/ProfileCard"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <FrameLayout
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="@drawable/bg_avatar_circle">
+
+                            <TextView
+                                android:id="@+id/profile_avatar_initial"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:gravity="center"
+                                android:textColor="@color/sidebar_text_primary"
+                                android:textSize="18sp"
+                                android:textStyle="bold"
+                                tools:text="J" />
+                        </FrameLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/ProfileLabel"
+                                android:text="@string/profile_label_username" />
+
+                            <TextView
+                                android:id="@+id/profile_full_name_value"
+                                style="@style/ProfileValue"
+                                android:layout_marginTop="4dp"
+                                tools:text="James nzioka" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Email -->
+                    <LinearLayout
+                        style="@style/ProfileCard"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:contentDescription="@null"
+                            android:padding="10dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_profile_email" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/ProfileLabel"
+                                android:text="@string/profile_label_email" />
+
+                            <TextView
+                                android:id="@+id/profile_email_value"
+                                style="@style/ProfileValue"
+                                android:layout_marginTop="4dp"
+                                tools:text="sdarottvback@gmail.com" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Phone -->
+                    <LinearLayout
+                        style="@style/ProfileCard"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:contentDescription="@null"
+                            android:padding="10dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_profile_phone" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/ProfileLabel"
+                                android:text="@string/profile_label_phone" />
+
+                            <TextView
+                                android:id="@+id/profile_phone_value"
+                                style="@style/ProfileValue"
+                                android:layout_marginTop="4dp"
+                                tools:text="+972506977209" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Support code -->
+                    <LinearLayout
+                        style="@style/ProfileCard"
+                        android:layout_marginBottom="0dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:contentDescription="@null"
+                            android:padding="10dp"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_profile_shield" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/ProfileLabel"
+                                android:text="@string/profile_label_connections" />
+
+                            <TextView
+                                android:id="@+id/profile_connections_value"
+                                style="@style/ProfileValue"
+                                android:layout_marginTop="4dp"
+                                tools:text="1 / 2" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Right column: subscription -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="6"
+                    android:background="@drawable/bg_profile_card"
+                    android:focusable="true"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="40dp"
+                            android:layout_height="40dp"
+                            android:contentDescription="@null"
+                            android:padding="4dp"
+                            android:src="@drawable/ic_profile_document" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                style="@style/ProfileLabel"
+                                android:text="@string/profile_label_subscription_status" />
+
+                            <TextView
+                                android:id="@+id/profile_subscription_status_value"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:textColor="@color/profile_status_active"
+                                android:textSize="18sp"
+                                android:textStyle="bold"
+                                tools:text="Active" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="20dp"
+                        android:layout_marginBottom="20dp"
+                        android:background="#33FFFFFF" />
+
+                    <TextView
+                        style="@style/ProfileLabel"
+                        android:text="@string/profile_label_existing_package" />
+
+                    <TextView
+                        android:id="@+id/profile_existing_package_value"
+                        style="@style/ProfileValue"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginBottom="20dp"
+                        tools:text="full package - 1 month - full package" />
+
+                    <TextView
+                        style="@style/ProfileLabel"
+                        android:text="@string/profile_label_valid_until" />
+
+                    <TextView
+                        android:id="@+id/profile_valid_until_value"
+                        style="@style/ProfileValue"
+                        android:layout_marginTop="6dp"
+                        tools:text="11:48:16 03-04-2026" />
+
+                    <TextView
+                        android:id="@+id/profile_days_remaining"
+                        style="@style/ProfileValue"
+                        android:layout_marginTop="4dp"
+                        android:textSize="14sp"
+                        tools:text="(12 Days to finish)" />
+
+                    <TextView
+                        style="@style/ProfileLabel"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/profile_label_member_since" />
+
+                    <TextView
+                        android:id="@+id/profile_member_since_value"
+                        style="@style/ProfileValue"
+                        android:layout_marginTop="6dp"
+                        tools:text="01-01-2025" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="28dp"
+                        android:lineSpacingExtra="4dp"
+                        android:text="@string/profile_disclaimer"
+                        android:textColor="@color/sidebar_text_primary"
+                        android:textSize="13sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:gravity="center_horizontal"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/profile_our_site_prefix"
+                            android:textColor="@color/sidebar_text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/profile_site_url"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:focusable="true"
+                            android:textColor="@color/profile_label_cyan"
+                            android:textSize="14sp"
+                            tools:text="https://ilvip.net" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>

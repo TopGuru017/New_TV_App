@@ -4,9 +4,10 @@ import android.os.Bundle
 import android.view.View
 import androidx.fragment.app.FragmentActivity
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
+import java.util.Locale
 
 /**
- * Shell with [IptvSidebarView] and main content [HomeContentFragment].
+ * Shell with [IptvSidebarView] and main content [HomeContentFragment] / [ProfileFragment].
  */
 class MainActivity : FragmentActivity() {
 
@@ -17,6 +18,13 @@ class MainActivity : FragmentActivity() {
         val mainContent = findViewById<View>(R.id.main_content)
         val root = window.decorView.findViewById<View>(android.R.id.content)
         sidebar.attachAutoExpandCollapse(root, mainContent)
+        sidebar.setProfileDisplayName(BuildConfig.IPTV_USERNAME.uppercase(Locale.getDefault()))
+        sidebar.setOnProfileClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, ProfileFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         if (savedInstanceState == null) {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, HomeContentFragment())

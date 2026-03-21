@@ -17,6 +17,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        buildConfigField("String", "IPTV_BASE_URL", "\"https://ilvip.net\"")
+        buildConfigField("String", "IPTV_USERNAME", "\"roku1234\"")
+        buildConfigField("String", "IPTV_PASSWORD", "\"11111111\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
@@ -37,5 +44,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.leanback)
+    implementation(libs.androidx.fragment.ktx)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.glide)
 }

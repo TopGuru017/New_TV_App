@@ -10,6 +10,7 @@ import android.util.AttributeSet
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
+import android.view.View.OnClickListener
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
@@ -94,6 +95,7 @@ class IptvSidebarView @JvmOverloads constructor(
 
     private var focusRoot: View? = null
     private var globalFocusListener: ViewTreeObserver.OnGlobalFocusChangeListener? = null
+    private var mainContentView: View? = null
 
     init {
         setBackgroundResource(R.color.sidebar_background)
@@ -132,6 +134,16 @@ class IptvSidebarView @JvmOverloads constructor(
         updateClockText()
     }
 
+    fun setOnProfileClickListener(listener: OnClickListener?) {
+        profileRow.setOnClickListener(listener)
+    }
+
+    /** Sets the label under the avatar (e.g. IPTV username from BuildConfig). */
+    fun setProfileDisplayName(name: CharSequence) {
+        profileName.text = name
+        refreshProfileInitial()
+    }
+
     private fun bindViews() {
         logoRow = findViewById(R.id.sidebar_logo_row)
         logoBrandSdarot = findViewById(R.id.sidebar_brand_sdarot)
@@ -164,6 +176,8 @@ class IptvSidebarView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         clockHandler.removeCallbacks(clockRunnable)
         removeGlobalFocusListener()
+        clearMainContentInset()
+        mainContentView = null
         super.onDetachedFromWindow()
     }
 
@@ -186,6 +200,8 @@ class IptvSidebarView @JvmOverloads constructor(
         val contentId = mainContent.id
         wireFocusRightToContent(contentId)
         mainContent.nextFocusLeftId = profileRow.id
+        mainContentView = mainContent
+        applySidebarWidthAndContentInset(animate = false)
     }
 
     private fun removeGlobalFocusListener() {
@@ -222,11 +238,14 @@ class IptvSidebarView @JvmOverloads constructor(
     }
 
     private fun applyVisualState(animateWidth: Boolean) {
-        val targetWidth = if (expanded) expandedWidthPx else collapsedWidthPx
-        animateSidebarWidth(targetWidth, animateWidth)
+        applySidebarWidthAndContentInset(animateWidth)
 
-        val edgePad = if (expanded) horizontalPadPx else 0
-        logoRow.setPaddingRelative(edgePad, logoRow.paddingTop, edgePad, logoRow.paddingBottom)
+        logoRow.setPaddingRelative(
+            horizontalPadPx,
+            logoRow.paddingTop,
+            horizontalPadPx,
+            logoRow.paddingBottom
+        )
         logoBrandSdarot.isVisible = expanded
         val slotLp = logoSlot.layoutParams as LinearLayout.LayoutParams
         val minLogoSlotW =
@@ -243,9 +262,15 @@ class IptvSidebarView @JvmOverloads constructor(
             logoSlot.minimumWidth = logoSlotSizePx
         }
         logoSlot.layoutParams = slotLp
-        logoRow.gravity =
-            if (expanded) Gravity.CENTER_VERTICAL or Gravity.START
-            else Gravity.CENTER
+        logoRow.gravity = rowGravityForExpandedState()
+
+        profileRow.setPaddingRelative(
+            horizontalPadPx,
+            profileRow.paddingTop,
+            horizontalPadPx,
+            profileRow.paddingBottom
+        )
+        profileRow.gravity = rowGravityForExpandedState()
 
         applyRowLayout(profileRow)
 
@@ -255,7 +280,12 @@ class IptvSidebarView @JvmOverloads constructor(
         vodChevron.isVisible = expanded
         syncVodSubmenu()
 
-        footerRow.setPaddingRelative(edgePad, footerRow.paddingTop, edgePad, footerRow.paddingBottom)
+        footerRow.setPaddingRelative(
+            horizontalPadPx,
+            footerRow.paddingTop,
+            horizontalPadPx,
+            footerRow.paddingBottom
+        )
         if (expanded) {
             footerRow.orientation = LinearLayout.HORIZONTAL
             footerRow.gravity = Gravity.CENTER_VERTICAL
@@ -276,17 +306,18 @@ class IptvSidebarView @JvmOverloads constructor(
         updateClockText()
     }
 
+    private fun rowGravityForExpandedState(): Int =
+        if (expanded) Gravity.CENTER_VERTICAL or Gravity.START
+        else Gravity.CENTER
+
     private fun applyRowLayout(row: LinearLayout) {
-        val hPad = if (expanded) horizontalPadPx else 0
-        row.setPaddingRelative(hPad, 0, hPad, 0)
+        row.setPaddingRelative(horizontalPadPx, 0, horizontalPadPx, 0)
         when (row.id) {
             R.id.row_live -> rowLiveLabel.isVisible = expanded
             R.id.row_vod -> row.getChildAt(1).isVisible = expanded
             else -> if (row.childCount >= 2) row.getChildAt(1).isVisible = expanded
         }
-        row.gravity =
-            if (expanded) Gravity.CENTER_VERTICAL or Gravity.START
-            else Gravity.CENTER
+        row.gravity = rowGravityForExpandedState()
     }
 
     private fun syncVodSubmenu() {
@@ -297,21 +328,42 @@ class IptvSidebarView @JvmOverloads constructor(
         )
     }
 
-    private fun animateSidebarWidth(toWidth: Int, animate: Boolean) {
-        val lp = layoutParams as? FrameLayout.LayoutParams ?: return
-        val fromWidth = if (width > 0) width else lp.width
-        if (!animate || fromWidth == toWidth) {
-            lp.width = toWidth
-            layoutParams = lp
+    /**
+     * Main content always reserves [collapsedWidthPx] on the start edge so its width stays fixed.
+     * Only the sidebar width animates; expanded rail draws over the left part of that region.
+     * Minimized rail: icons centered horizontally in the column ([Gravity.CENTER]).
+     */
+    private fun applySidebarWidthAndContentInset(animate: Boolean) {
+        val targetSidebarW = if (expanded) expandedWidthPx else collapsedWidthPx
+        val slp = layoutParams as? FrameLayout.LayoutParams ?: return
+        mainContentView?.let { content ->
+            val clp = content.layoutParams as? FrameLayout.LayoutParams ?: return@let
+            if (clp.marginStart != collapsedWidthPx) {
+                clp.marginStart = collapsedWidthPx
+                content.layoutParams = clp
+            }
+        }
+
+        val fromW = if (width > 0) width else slp.width
+        if (!animate || fromW == targetSidebarW) {
+            slp.width = targetSidebarW
+            layoutParams = slp
             return
         }
-        ValueAnimator.ofInt(fromWidth, toWidth).apply {
+        ValueAnimator.ofInt(fromW, targetSidebarW).apply {
             duration = 220
             addUpdateListener { anim ->
-                lp.width = anim.animatedValue as Int
-                layoutParams = lp
+                slp.width = anim.animatedValue as Int
+                layoutParams = slp
             }
         }.start()
+    }
+
+    private fun clearMainContentInset() {
+        val content = mainContentView ?: return
+        val clp = content.layoutParams as? FrameLayout.LayoutParams ?: return
+        clp.marginStart = 0
+        content.layoutParams = clp
     }
 
     private fun updateClockText() {

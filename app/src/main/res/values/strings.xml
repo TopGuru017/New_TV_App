@@ -20,7 +20,7 @@
     <!-- IPTV sidebar -->
     <string name="sidebar_brand_sdarot">SDAROT</string>
     <string name="sidebar_logo_content_description">Sdarot TV logo</string>
-    <string name="profile_display_name">JAMES NZIOKA</string>
+    <string name="profile_display_name">Account</string>
     <string name="sidebar_search">SEARCH</string>
     <string name="sidebar_favorites">FAVORITES</string>
     <string name="sidebar_last_watch">LAST WATCH</string>
@@ -32,4 +32,25 @@
     <string name="sidebar_vod_movies">MOVIES</string>
     <string name="sidebar_settings">SETTINGS</string>
     <string name="home_content_placeholder">IPTV — main content</string>
+
+    <!-- Profile screen -->
+    <string name="profile_screen_title">My Profile</string>
+    <string name="profile_label_username">Username</string>
+    <string name="profile_label_email">Email</string>
+    <string name="profile_label_phone">Phone</string>
+    <string name="profile_label_member_since">Member since</string>
+    <string name="profile_label_connections">Concurrent streams</string>
+    <string name="profile_label_subscription_status">Subscription status</string>
+    <string name="profile_label_existing_package">Existing package</string>
+    <string name="profile_label_valid_until">The package is valid until</string>
+    <string name="profile_not_available">Not provided</string>
+    <string name="profile_package_trial">Trial access</string>
+    <string name="profile_package_full">Full access</string>
+    <string name="profile_connections_summary">%1$d / %2$d in use</string>
+    <string name="profile_days_remaining_template">(%1$d days remaining)</string>
+    <string name="profile_expired">(Expired)</string>
+    <string name="profile_expires_today">(Expires today)</string>
+    <string name="profile_load_error">Could not load account. Check connection and credentials.</string>
+    <string name="profile_disclaimer">* Changing personal details or purchasing a package will be possible on our web site.</string>
+    <string name="profile_our_site_prefix">Our site:</string>
 </resources>
