@@ -138,6 +138,10 @@ class IptvSidebarView @JvmOverloads constructor(
         profileRow.setOnClickListener(listener)
     }
 
+    fun setOnLiveClickListener(listener: OnClickListener?) {
+        rowLive.setOnClickListener(listener)
+    }
+
     /** Sets the label under the avatar (e.g. IPTV username from BuildConfig). */
     fun setProfileDisplayName(name: CharSequence) {
         profileName.text = name

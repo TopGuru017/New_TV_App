@@ -15,4 +15,15 @@
     <dimen name="sidebar_gap_vod_to_settings">40dp</dimen>
     <dimen name="sidebar_vod_submenu_margin_bottom">8dp</dimen>
     <dimen name="sidebar_vod_chevron_size">16dp</dimen>
+
+    <!-- Live TV -->
+    <dimen name="live_hero_logo_size">132dp</dimen>
+    <dimen name="live_category_row_height">40dp</dimen>
+    <dimen name="live_channel_tile_width">112dp</dimen>
+    <dimen name="live_channel_icon_size">72dp</dimen>
+    <dimen name="live_horizontal_list_padding">4dp</dimen>
+    <dimen name="live_hero_channel_logo">76dp</dimen>
+    <dimen name="live_hero_channel_logo_large">108dp</dimen>
+    <dimen name="live_preview_height">168dp</dimen>
+    <dimen name="live_grid_spacing">8dp</dimen>
 </resources>

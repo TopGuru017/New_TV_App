@@ -2,38 +2,170 @@ package com.example.new_tv_app
 
 import android.net.Uri
 import android.os.Bundle
-import androidx.leanback.app.VideoSupportFragment
-import androidx.leanback.app.VideoSupportFragmentGlueHost
-import androidx.leanback.media.MediaPlayerAdapter
-import androidx.leanback.media.PlaybackTransportControlGlue
-import androidx.leanback.widget.PlaybackControlsRow
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.Toast
+import androidx.core.content.IntentCompat
+import androidx.core.view.doOnLayout
+import androidx.fragment.app.Fragment
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
-/** Handles video playback with media controls. */
-class PlaybackVideoFragment : VideoSupportFragment() {
+/** Plays VOD and live IPTV via LibVLC (handles redirects / HLS / odd servers better than MediaPlayer / ExoPlayer defaults). */
+class PlaybackVideoFragment : Fragment() {
 
-    private lateinit var mTransportControlGlue: PlaybackTransportControlGlue<MediaPlayerAdapter>
+    private var libVLC: LibVLC? = null
+    private var mediaPlayer: MediaPlayer? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override fun onCreateView(
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?,
+    ): View = inflater.inflate(R.layout.fragment_playback_video, container, false)
 
-        val (_, title, description, _, _, videoUrl) =
-            activity?.intent?.getSerializableExtra(DetailsActivity.MOVIE) as Movie
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        Log.d(TAG, "onViewCreated")
 
-        val glueHost = VideoSupportFragmentGlueHost(this@PlaybackVideoFragment)
-        val playerAdapter = MediaPlayerAdapter(activity)
-        playerAdapter.setRepeatAction(PlaybackControlsRow.RepeatAction.INDEX_NONE)
+        val movie = IntentCompat.getSerializableExtra(
+            requireActivity().intent,
+            DetailsActivity.MOVIE,
+            Movie::class.java,
+        ) ?: run {
+            Log.e(TAG, "no Movie in intent; finishing")
+            Toast.makeText(requireContext(), R.string.playback_error_no_media, Toast.LENGTH_LONG).show()
+            requireActivity().finish()
+            return
+        }
 
-        mTransportControlGlue = PlaybackTransportControlGlue(getActivity(), playerAdapter)
-        mTransportControlGlue.host = glueHost
-        mTransportControlGlue.title = title
-        mTransportControlGlue.subtitle = description
-        mTransportControlGlue.playWhenPrepared()
+        val url = movie.videoUrl?.trim().orEmpty()
+        if (url.isEmpty()) {
+            Log.e(TAG, "empty videoUrl; finishing")
+            Toast.makeText(requireContext(), R.string.playback_error_no_media, Toast.LENGTH_LONG).show()
+            requireActivity().finish()
+            return
+        }
 
-        playerAdapter.setDataSource(Uri.parse(videoUrl))
+        logPlaybackTarget(url, movie.title)
+
+        val videoLayout = view.findViewById<VLCVideoLayout>(R.id.vlc_video_layout)
+        videoLayout.doOnLayout { vl ->
+            Log.d(
+                TAG,
+                "VLCVideoLayout laid out: w=${vl.width} h=${vl.height} " +
+                    "visible=${vl.visibility == View.VISIBLE} isShown=${vl.isShown}",
+            )
+        }
+
+        val options = ArrayList<String>().apply {
+            add("--network-caching=2500")
+            add("--http-reconnect")
+            // Extra VLC engine lines in Logcat (tag often "VLC" / "vlc"); remove if too noisy.
+            add("-vv")
+        }
+        Log.d(TAG, "LibVLC options=$options")
+
+        val vlc = LibVLC(requireContext(), options)
+        libVLC = vlc
+        val player = MediaPlayer(vlc)
+        mediaPlayer = player
+
+        player.setEventListener { event ->
+            logVlcEvent(event)
+            if (event.type == MediaPlayer.Event.EncounteredError) {
+                Log.e(TAG, "EncounteredError — check network / URL / codec (see VLC logs above)")
+                view.post {
+                    if (isAdded) {
+                        Toast.makeText(
+                            requireContext(),
+                            getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            }
+        }
+
+        Log.d(TAG, "attachViews → VLCVideoLayout")
+        player.attachViews(videoLayout, null, false, false)
+
+        val media = Media(vlc, Uri.parse(url))
+        Log.d(TAG, "Media created, binding to player")
+        player.media = media
+        media.release()
+
+        Log.d(TAG, "play() called")
+        player.play()
     }
 
-    override fun onPause() {
-        super.onPause()
-        mTransportControlGlue.pause()
+    override fun onStop() {
+        Log.d(TAG, "onStop → pause()")
+        mediaPlayer?.pause()
+        super.onStop()
+    }
+
+    override fun onDestroyView() {
+        Log.d(TAG, "onDestroyView → stop/detach/release")
+        mediaPlayer?.let { p ->
+            p.stop()
+            p.detachViews()
+            p.release()
+        }
+        mediaPlayer = null
+        libVLC?.release()
+        libVLC = null
+        super.onDestroyView()
+    }
+
+    private companion object {
+        const val TAG = "PlaybackVLC"
+
+        /** Logs host + stream id only (path contains credentials for Xtream-style URLs). */
+        fun logPlaybackTarget(url: String, title: String?) {
+            val u = Uri.parse(url)
+            val last = u.lastPathSegment ?: "?"
+            Log.i(TAG, "title=${title ?: "?"} host=${u.host} scheme=${u.scheme} lastSegment=$last (full URL omitted — contains credentials)")
+        }
+
+        fun logVlcEvent(event: MediaPlayer.Event) {
+            val name = eventTypeName(event.type)
+            val extra = when (event.type) {
+                MediaPlayer.Event.Buffering -> " buffering=${event.buffering}"
+                else -> ""
+            }
+            val level = when (event.type) {
+                MediaPlayer.Event.EncounteredError -> Log.ERROR
+                MediaPlayer.Event.Opening,
+                MediaPlayer.Event.Playing,
+                MediaPlayer.Event.Vout,
+                -> Log.INFO
+                else -> Log.DEBUG
+            }
+            Log.println(level, TAG, "event: $name$extra")
+        }
+
+        fun eventTypeName(type: Int): String = when (type) {
+            MediaPlayer.Event.Opening -> "Opening"
+            MediaPlayer.Event.Buffering -> "Buffering"
+            MediaPlayer.Event.Playing -> "Playing"
+            MediaPlayer.Event.Paused -> "Paused"
+            MediaPlayer.Event.Stopped -> "Stopped"
+            MediaPlayer.Event.EndReached -> "EndReached"
+            MediaPlayer.Event.EncounteredError -> "EncounteredError"
+            MediaPlayer.Event.TimeChanged -> "TimeChanged"
+            MediaPlayer.Event.PositionChanged -> "PositionChanged"
+            MediaPlayer.Event.SeekableChanged -> "SeekableChanged"
+            MediaPlayer.Event.PausableChanged -> "PausableChanged"
+            MediaPlayer.Event.LengthChanged -> "LengthChanged"
+            MediaPlayer.Event.Vout -> "Vout"
+            MediaPlayer.Event.MediaChanged -> "MediaChanged"
+            MediaPlayer.Event.ESAdded -> "ESAdded"
+            MediaPlayer.Event.ESDeleted -> "ESDeleted"
+            else -> "Unknown($type)"
+        }
     }
 }

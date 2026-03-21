@@ -19,6 +19,12 @@ class MainActivity : FragmentActivity() {
         val root = window.decorView.findViewById<View>(android.R.id.content)
         sidebar.attachAutoExpandCollapse(root, mainContent)
         sidebar.setProfileDisplayName(BuildConfig.IPTV_USERNAME.uppercase(Locale.getDefault()))
+        sidebar.setOnLiveClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, LiveTvFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnProfileClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, ProfileFragment())
