@@ -121,7 +121,7 @@
 
     <!-- Login -->
     <string name="login_hello">Hello! Welcome to</string>
-    <string name="login_brand_israel">ISRAEL</string>
+    <string name="login_brand_sdarot">SDAROT</string>
     <string name="login_brand_tv">TV</string>
     <string name="login_subtitle">Please sign in to your account.</string>
     <string name="login_username_hint">Username</string>
@@ -136,4 +136,22 @@
     <string name="login_build_fmt">Build: %1$s, %2$s (%3$d)</string>
     <string name="login_qr_toast">QR login is not available yet.</string>
     <string name="login_reset_toast">Use your provider’s site to reset your password.</string>
+
+    <!-- TV Guide -->
+    <string name="tv_guide_title">TV guide</string>
+    <string name="tv_guide_reminders">Reminders</string>
+    <string name="tv_guide_genre_fmt">Genre: %1$s</string>
+    <string name="tv_guide_duration_fmt">Time: %1$s</string>
+    <string name="tv_guide_now">• Now</string>
+    <string name="tv_guide_load_error">Could not load TV guide.</string>
+    <string name="tv_guide_empty">No programs for this channel.</string>
+    <string name="tv_guide_no_description">No description available.</string>
+
+    <!-- Reminders -->
+    <string name="reminders_title">Reminders</string>
+    <string name="reminders_empty">No reminders</string>
+    <string name="reminders_delete_confirm">Are you sure you want to delete this reminder?</string>
+    <string name="reminders_delete_yes">Yes</string>
+    <string name="reminders_delete_no">No</string>
+    <string name="reminders_added">Added to reminders</string>
 </resources>

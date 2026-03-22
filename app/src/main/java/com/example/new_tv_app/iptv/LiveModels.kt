@@ -19,4 +19,5 @@ data class EpgListing(
     val category: String?,
     val startUnix: Long,
     val endUnix: Long,
+    val imageUrl: String? = null,
 )

@@ -19,8 +19,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.isVisible
 import com.example.new_tv_app.R
-import java.text.SimpleDateFormat
-import java.util.Date
+import com.example.new_tv_app.iptv.IptvTimeUtils
 import java.util.Locale
 
 /**
@@ -140,6 +139,10 @@ class IptvSidebarView @JvmOverloads constructor(
 
     fun setOnLiveClickListener(listener: OnClickListener?) {
         rowLive.setOnClickListener(listener)
+    }
+
+    fun setOnTvGuideClickListener(listener: OnClickListener?) {
+        rowTvGuide.setOnClickListener(listener)
     }
 
     fun setOnSettingsClickListener(listener: OnClickListener?) {
@@ -383,9 +386,9 @@ class IptvSidebarView @JvmOverloads constructor(
     }
 
     private fun updateClockText() {
-        val locale = Locale.getDefault()
-        val time = SimpleDateFormat("HH:mm", locale).format(Date())
-        val day = SimpleDateFormat("EEEE", locale).format(Date())
+        val now = IptvTimeUtils.nowIsraelSeconds()
+        val time = IptvTimeUtils.formatTimeIsrael(now)
+        val day = IptvTimeUtils.formatDateIsrael(now, "EEEE")
         clockView.text = if (expanded) "$time $day" else time
     }
 

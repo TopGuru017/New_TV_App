@@ -28,10 +28,27 @@ object XtreamLiveApi {
         }
     }
 
+    /** All live streams (no category filter). */
+    suspend fun fetchAllLiveStreams(): Result<List<LiveStream>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val json = get("get_live_streams")
+            parseStreams(parseArray(json))
+        }
+    }
+
     suspend fun fetchShortEpg(streamId: String): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
         runCatching {
             parseEpgListings(
                 get("get_short_epg", "stream_id" to streamId, "limit" to "8")
+            )
+        }
+    }
+
+    /** Full EPG for TV guide (higher limit). */
+    suspend fun fetchFullEpg(streamId: String, limit: Int = 50): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
+        runCatching {
+            parseEpgListings(
+                get("get_short_epg", "stream_id" to streamId, "limit" to limit.toString())
             )
         }
     }
@@ -122,6 +139,9 @@ object XtreamLiveApi {
             val start = readUnix(o, "start_timestamp", "start")
             val end = readUnix(o, "stop_timestamp", "end_timestamp", "stop", "end")
             if (start <= 0L || end <= 0L || end <= start) continue
+            val img = o.optString("cover").trim().takeIf { it.isNotEmpty() }
+                ?: o.optString("image").trim().takeIf { it.isNotEmpty() }
+                ?: o.optString("icon").trim().takeIf { it.isNotEmpty() }
             out.add(
                 EpgListing(
                     title = title,
@@ -129,6 +149,7 @@ object XtreamLiveApi {
                     category = cat,
                     startUnix = start,
                     endUnix = end,
+                    imageUrl = img,
                 )
             )
         }

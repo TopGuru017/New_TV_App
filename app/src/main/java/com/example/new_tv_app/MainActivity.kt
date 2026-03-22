@@ -29,6 +29,12 @@ class MainActivity : FragmentActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+        sidebar.setOnTvGuideClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, TvGuideFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnVodMoviesClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, VodBrowseFragment.newInstance(VodBrowseFragment.MODE_MOVIES))

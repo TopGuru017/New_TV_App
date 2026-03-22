@@ -30,4 +30,8 @@
     <!-- Settings screen -->
     <dimen name="settings_nav_column_width">268dp</dimen>
     <dimen name="settings_content_padding">24dp</dimen>
+
+    <!-- TV Guide -->
+    <dimen name="tv_guide_channel_column_width">140dp</dimen>
+    <dimen name="tv_guide_program_spacing">10dp</dimen>
 </resources>

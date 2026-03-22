@@ -42,7 +42,7 @@
                 android:nextFocusDown="@id/login_lang_en"
                 android:padding="6dp"
                 android:scaleType="centerInside"
-                android:src="@drawable/ic_flag_il" />
+                android:src="@drawable/ic_login_flag_israel" />
 
             <ImageButton
                 android:id="@+id/login_lang_en"
@@ -56,7 +56,7 @@
                 android:nextFocusUp="@id/login_lang_he"
                 android:padding="6dp"
                 android:scaleType="centerInside"
-                android:src="@drawable/ic_flag_gb" />
+                android:src="@drawable/ic_login_flag_uk" />
         </LinearLayout>
 
         <LinearLayout
@@ -86,7 +86,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/login_brand_israel"
+                    android:text="@string/login_brand_sdarot"
                     android:textColor="#FFFFFF"
                     android:textSize="34sp"
                     android:textStyle="bold" />
