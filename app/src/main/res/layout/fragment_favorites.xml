@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/content_background"
+    android:paddingStart="24dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="24dp"
+    android:paddingBottom="14dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/favorites_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/favorites_title"
+            android:textColor="@color/sidebar_text_primary"
+            android:textSize="20sp"
+            android:textStyle="normal"
+            tools:text="Favorites" />
+
+        <TextView
+            android:id="@+id/favorites_edit"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_search_clear_button"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp"
+            android:text="@string/favorites_edit"
+            android:textAllCaps="false"
+            android:textColor="@color/sidebar_text_primary"
+            android:textSize="13sp"
+            tools:text="Edit" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/favorites_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:text="@string/favorites_empty"
+        android:textColor="@color/sidebar_text_primary"
+        android:textSize="17sp"
+        android:textStyle="normal"
+        tools:text="Favorites list is empty :-(" />
+
+</FrameLayout>

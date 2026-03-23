@@ -43,6 +43,9 @@
     <string name="last_watch_header_vod_series">VOD - SERIES</string>
     <string name="last_watch_header_vod_movies">VOD - MOVIES</string>
     <string name="last_watch_empty">No watch history yet</string>
+    <string name="favorites_title">Favorites</string>
+    <string name="favorites_edit">Edit</string>
+    <string name="favorites_empty">Favorites list is empty :-(</string>
 
     <!-- Search -->
     <string name="search_placeholder">Type search keywords here…</string>

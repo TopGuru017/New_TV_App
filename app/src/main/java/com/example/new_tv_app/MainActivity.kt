@@ -29,6 +29,12 @@ class MainActivity : FragmentActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+        sidebar.setOnFavoritesClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, FavoritesFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnLiveClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, LiveTvFragment())
