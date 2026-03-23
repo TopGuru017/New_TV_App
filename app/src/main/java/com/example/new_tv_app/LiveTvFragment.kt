@@ -185,7 +185,9 @@ class LiveTvFragment : Fragment() {
 
         fun requestFocusFirstChannel() {
             if (channelAdapter.itemCount <= 0) return
-            requireActivity().findViewById<View>(R.id.main_content).clearFocus()
+            // Do not clearFocus() on main_content: after clearing, the framework often
+            // focuses the first focusable in the fragment (first category chip), which
+            // triggers scheduleLoadStreams(first) and breaks the selected category.
             channelsRv.scrollToPosition(0)
             fun tryFocus(attempt: Int) {
                 channelsRv.post {

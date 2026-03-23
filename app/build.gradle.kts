@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.constraintlayout)
     implementation(libs.glide)
     implementation(libs.videolan.libvlc)
 }

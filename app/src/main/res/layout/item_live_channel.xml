@@ -1,32 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_live_grid_tile"
     android:clickable="true"
     android:focusable="true"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:padding="10dp">
+    android:padding="6dp">
 
     <ImageView
         android:id="@+id/live_channel_icon"
-        android:layout_width="@dimen/live_channel_icon_size"
-        android:layout_height="@dimen/live_channel_icon_size"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
         android:contentDescription="@null"
         android:scaleType="fitCenter"
+        app:layout_constraintDimensionRatio="1:1"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
         tools:src="@mipmap/ic_launcher" />
 
     <TextView
         android:id="@+id/live_channel_name"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="6dp"
         android:ellipsize="end"
         android:gravity="center_horizontal"
         android:maxLines="2"
         android:textColor="@color/sidebar_text_primary"
         android:textSize="11sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/live_channel_icon"
         tools:text="Channel 12" />
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
