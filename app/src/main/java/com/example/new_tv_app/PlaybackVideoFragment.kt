@@ -25,6 +25,8 @@ class PlaybackVideoFragment : Fragment() {
 
     private var libVLC: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var currentPlaybackUrl: String = ""
+    private var didCrossProtocolRetry = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -55,6 +57,8 @@ class PlaybackVideoFragment : Fragment() {
             return
         }
 
+        currentPlaybackUrl = url
+        didCrossProtocolRetry = false
         logPlaybackTarget(url, movie.title)
 
         val videoLayout = view.findViewById<VLCVideoLayout>(R.id.vlc_video_layout)
@@ -82,6 +86,7 @@ class PlaybackVideoFragment : Fragment() {
         player.setEventListener { event ->
             logVlcEvent(event)
             if (event.type == MediaPlayer.Event.EncounteredError) {
+                if (retryWithAlternateSchemeIfNeeded()) return@setEventListener
                 Log.e(TAG, "EncounteredError — check network / URL / codec (see VLC logs above)")
                 view.post {
                     if (isAdded) {
@@ -98,14 +103,7 @@ class PlaybackVideoFragment : Fragment() {
         Log.d(TAG, "attachViews → VLCVideoLayout")
         player.attachViews(videoLayout, null, false, false)
 
-        val media = Media(vlc, Uri.parse(url))
-        applyPanelFriendlyHttpOptions(media, url)
-        Log.d(TAG, "Media created, binding to player")
-        player.media = media
-        media.release()
-
-        Log.d(TAG, "play() called")
-        player.play()
+        startPlayback(player, url)
     }
 
     override fun onStop() {
@@ -188,5 +186,42 @@ class PlaybackVideoFragment : Fragment() {
             MediaPlayer.Event.ESDeleted -> "ESDeleted"
             else -> "Unknown($type)"
         }
+    }
+
+    private fun startPlayback(player: MediaPlayer, url: String) {
+        currentPlaybackUrl = url
+        val media = Media(libVLC ?: return, Uri.parse(url))
+        applyPanelFriendlyHttpOptions(media, url)
+        Log.d(TAG, "Media created, binding to player; url=${sanitizeUrlForLog(url)}")
+        player.media = media
+        media.release()
+        Log.d(TAG, "play() called")
+        player.play()
+    }
+
+    private fun retryWithAlternateSchemeIfNeeded(): Boolean {
+        if (didCrossProtocolRetry) return false
+        val alt = alternateScheme(currentPlaybackUrl) ?: return false
+        val player = mediaPlayer ?: return false
+        didCrossProtocolRetry = true
+        Log.w(
+            TAG,
+            "Retrying playback with alternate scheme: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(alt)}",
+        )
+        startPlayback(player, alt)
+        return true
+    }
+
+    private fun alternateScheme(url: String): String? = when {
+        url.startsWith("https://", ignoreCase = true) ->
+            "http://${url.removePrefix("https://")}"
+        url.startsWith("http://", ignoreCase = true) ->
+            "https://${url.removePrefix("http://")}"
+        else -> null
+    }
+
+    private fun sanitizeUrlForLog(url: String): String {
+        val u = Uri.parse(url)
+        return "${u.scheme}://${u.host}${u.path.orEmpty()}"
     }
 }

@@ -7,7 +7,9 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 /**
  * Xtream Codes / XUI live TV endpoints on [player_api.php](https://github.com/tellytv/xtream-api).
@@ -123,13 +125,29 @@ object XtreamLiveApi {
         conn.readTimeout = 8_000
         conn.requestMethod = "GET"
         val code = conn.responseCode
-        val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-            ?.bufferedReader(StandardCharsets.UTF_8)
-            ?.use { it.readText() }
-            .orEmpty()
+        val bytes = (if (code in 200..299) conn.inputStream else conn.errorStream)
+            ?.use { it.readBytes() }
+            ?: ByteArray(0)
+        val declaredCharset = conn.contentType
+            ?.substringAfter("charset=", missingDelimiterValue = "")
+            ?.substringBefore(';')
+            ?.trim()
+            ?.trim('"', '\'')
+            ?.takeIf { it.isNotEmpty() }
+        val text = decodeApiText(bytes, declaredCharset)
         conn.disconnect()
         if (code !in 200..299) error("HTTP $code: ${text.take(200)}")
         return text
+    }
+
+    private fun decodeApiText(bytes: ByteArray, declaredCharset: String?): String {
+        if (bytes.isEmpty()) return ""
+        val declared = runCatching { declaredCharset?.let { Charset.forName(it) } }.getOrNull()
+        val primary = if (declared != null) String(bytes, declared) else String(bytes, StandardCharsets.UTF_8)
+        if (containsHebrew(primary)) return primary
+        val utf8 = String(bytes, StandardCharsets.UTF_8)
+        if (containsHebrew(utf8)) return utf8
+        return recoverMisdecodedHebrew(utf8)
     }
 
     private fun parseArray(json: String): JSONArray {
@@ -138,7 +156,7 @@ object XtreamLiveApi {
         val obj = JSONObject(t)
         val user = obj.optJSONObject("user_info")
         if (user != null && user.optInt("auth", 0) != 1) {
-            error(user.optString("message").ifBlank { "Unauthorized" })
+            error(decodeXtreamText(user.optString("message")).ifBlank { "Unauthorized" })
         }
         if (obj.has("data")) return obj.getJSONArray("data")
         return JSONArray()
@@ -150,7 +168,7 @@ object XtreamLiveApi {
             val o = arr.optJSONObject(i) ?: continue
             val id = o.optString("category_id")
             if (id.isBlank()) continue
-            val name = o.optString("category_name").ifBlank { id }
+            val name = decodeXtreamText(o.optString("category_name")).ifBlank { id }
             out.add(LiveCategory(id = id, name = name))
         }
         return out
@@ -162,7 +180,7 @@ object XtreamLiveApi {
             val o = arr.optJSONObject(i) ?: continue
             val id = o.optString("stream_id")
             if (id.isBlank()) continue
-            val name = o.optString("name").ifBlank { id }
+            val name = decodeXtreamText(o.optString("name")).ifBlank { id }
             val icon = o.optString("stream_icon").trim().takeIf { it.isNotEmpty() }
             val cat = o.optString("category_id").trim().takeIf { it.isNotEmpty() }
             val epg = o.optString("epg_channel_id").trim().takeIf { it.isNotEmpty() }
@@ -203,11 +221,15 @@ object XtreamLiveApi {
         val out = ArrayList<EpgListing>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val title = o.optString("title").ifBlank { o.optString("name") }
+            val title = decodeXtreamText(o.optString("title"))
+                .ifBlank { decodeXtreamText(o.optString("name")) }
+                .ifBlank { decodeXtreamText(o.optString("title_base64")) }
             if (title.isBlank()) continue
-            val desc = o.optString("description").trim()
-            val cat = o.optString("category_name").trim().takeIf { it.isNotEmpty() }
-                ?: o.optString("category").trim().takeIf { it.isNotEmpty() }
+            val desc = decodeXtreamText(o.optString("description"))
+                .ifBlank { decodeXtreamText(o.optString("description_base64")) }
+                .trim()
+            val cat = decodeXtreamText(o.optString("category_name")).trim().takeIf { it.isNotEmpty() }
+                ?: decodeXtreamText(o.optString("category")).trim().takeIf { it.isNotEmpty() }
             val start = readUnix(o, "start_timestamp", "start", "start_time")
             val end = readUnix(o, "stop_timestamp", "end_timestamp", "stop", "end", "end_time")
             if (start <= 0L || end <= 0L || end <= start) continue
@@ -245,5 +267,39 @@ object XtreamLiveApi {
             if (parsed > 0L) return parsed
         }
         return 0L
+    }
+
+    private fun decodeXtreamText(raw: String?): String {
+        val input = raw?.trim().orEmpty()
+        if (input.isEmpty()) return ""
+        val decoded = decodeBase64IfLikely(input) ?: input
+        return recoverMisdecodedHebrew(decoded).trim()
+    }
+
+    private fun decodeBase64IfLikely(value: String): String? {
+        val compact = value.filterNot { it == '\r' || it == '\n' || it == ' ' || it == '\t' }
+        if (compact.length < 8 || compact.length % 4 != 0) return null
+        if (!compact.matches(Regex("^[A-Za-z0-9+/=]+$"))) return null
+        val bytes = runCatching { Base64.getDecoder().decode(compact) }.getOrNull() ?: return null
+        if (bytes.isEmpty()) return null
+        val utf8 = String(bytes, StandardCharsets.UTF_8).trim()
+        if (containsHebrew(utf8) || utf8.any { it.isLetter() }) return utf8
+        val cp1255 = runCatching { String(bytes, Charset.forName("windows-1255")).trim() }.getOrNull()
+        if (!cp1255.isNullOrEmpty() && containsHebrew(cp1255)) return cp1255
+        val iso88598 = runCatching { String(bytes, Charset.forName("ISO-8859-8")).trim() }.getOrNull()
+        if (!iso88598.isNullOrEmpty() && containsHebrew(iso88598)) return iso88598
+        return null
+    }
+
+    private fun containsHebrew(text: String): Boolean =
+        text.any { it.code in 0x0590..0x05FF }
+
+    private fun recoverMisdecodedHebrew(text: String): String {
+        val looksMojibake = text.count { it == '×' || it == 'Ø' } >= 2
+        if (!looksMojibake) return text
+        val repaired = runCatching {
+            String(text.toByteArray(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8)
+        }.getOrElse { text }
+        return if (containsHebrew(repaired)) repaired else text
     }
 }
