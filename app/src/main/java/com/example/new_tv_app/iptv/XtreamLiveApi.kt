@@ -95,18 +95,32 @@ object XtreamLiveApi {
     }
 
     private fun get(action: String, vararg extra: Pair<String, String>): String {
-        val base = IptvCredentials.baseUrl()
         val u = URLEncoder.encode(IptvCredentials.usernameRaw(), StandardCharsets.UTF_8.name())
         val p = URLEncoder.encode(IptvCredentials.passwordRaw(), StandardCharsets.UTF_8.name())
-        val sb = StringBuilder("$base/player_api.php?username=$u&password=$p")
-        sb.append("&action=").append(URLEncoder.encode(action, StandardCharsets.UTF_8.name()))
+        val query = StringBuilder("player_api.php?username=$u&password=$p")
+        query.append("&action=").append(URLEncoder.encode(action, StandardCharsets.UTF_8.name()))
         for ((k, v) in extra) {
-            sb.append("&").append(URLEncoder.encode(k, StandardCharsets.UTF_8.name()))
+            query.append("&").append(URLEncoder.encode(k, StandardCharsets.UTF_8.name()))
                 .append("=").append(URLEncoder.encode(v, StandardCharsets.UTF_8.name()))
         }
-        val conn = URL(sb.toString()).openConnection() as HttpURLConnection
-        conn.connectTimeout = 25_000
-        conn.readTimeout = 25_000
+        var lastErr: Throwable? = null
+        for (base in IptvCredentials.candidateBaseUrls()) {
+            val fullUrl = "$base/${query}"
+            try {
+                val body = httpGet(fullUrl)
+                IptvCredentials.markWorkingBaseUrl(base)
+                return body
+            } catch (t: Throwable) {
+                lastErr = t
+            }
+        }
+        throw (lastErr ?: IllegalStateException("No base URL candidates available"))
+    }
+
+    private fun httpGet(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 8_000
+        conn.readTimeout = 8_000
         conn.requestMethod = "GET"
         val code = conn.responseCode
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)

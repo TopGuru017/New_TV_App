@@ -41,6 +41,12 @@ class MainActivity : FragmentActivity() {
                 .addToBackStack(null)
                 .commit()
         }
+        sidebar.setOnLastWatchClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, HomeContentFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnTvGuideClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, TvGuideFragment())

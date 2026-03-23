@@ -9,7 +9,7 @@ import android.net.Uri
 object IptvStreamUrls {
 
     fun liveStreamUrl(streamId: String): String {
-        val base = IptvCredentials.baseUrl()
+        val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
         val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
         val id = streamId.trim().trimStart('/')
@@ -17,7 +17,7 @@ object IptvStreamUrls {
     }
 
     fun vodMovieUrl(streamId: String, containerExtension: String): String {
-        val base = IptvCredentials.baseUrl()
+        val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
         val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
         val id = streamId.trim().trimStart('/')
@@ -26,7 +26,7 @@ object IptvStreamUrls {
     }
 
     fun seriesEpisodeUrl(episodeStreamId: String, containerExtension: String): String {
-        val base = IptvCredentials.baseUrl()
+        val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
         val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
         val id = episodeStreamId.trim().trimStart('/')
@@ -35,16 +35,20 @@ object IptvStreamUrls {
     }
 
     /**
-     * Xtream-style catch-up URL. [durationSeconds] is often required by panels (clip length).
-     * If your panel expects minutes instead, adjust the caller.
+     * Xtream-style catch-up URL for recordings (timeshift).
+     *
+     * Many Xtream-based panels expect the "duration" path segment in **minutes** (clip length),
+     * not seconds.
      */
     fun timeshiftStreamUrl(streamId: String, startUnix: Long, endUnix: Long): String {
-        val base = IptvCredentials.baseUrl().trimEnd('/')
+        val base = IptvCredentials.preferredBaseUrl().trimEnd('/')
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
         val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
         val id = streamId.trim().trimStart('/')
-        val durationSec = (endUnix - startUnix).toInt().coerceIn(60, 8 * 3600)
+        val durationMinutes = ((endUnix - startUnix) / 60L)
+            .toInt()
+            .coerceIn(1, 8 * 60) // 1..480 minutes
         val startFmt = IptvTimeUtils.formatTimeshiftStartIsrael(startUnix)
-        return "$base/timeshift/$u/$p/$durationSec/$startFmt/$id.m3u8"
+        return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.m3u8"
     }
 }

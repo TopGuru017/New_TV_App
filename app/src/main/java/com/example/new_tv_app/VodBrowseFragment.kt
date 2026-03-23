@@ -24,6 +24,8 @@ import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.XtreamVodApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -151,6 +153,24 @@ class VodBrowseFragment : Fragment() {
                 videoUrl = url,
                 studio = null,
             )
+
+            val played = IptvTimeUtils.nowIsraelSeconds()
+            if (mode == MODE_SERIES) {
+                LastWatchStore.addVodSeries(
+                    context = requireContext(),
+                    playedUnixSeconds = played,
+                    movie = movie,
+                    imageUrl = cover,
+                )
+            } else {
+                LastWatchStore.addVodMovies(
+                    context = requireContext(),
+                    playedUnixSeconds = played,
+                    movie = movie,
+                    imageUrl = cover,
+                )
+            }
+
             startActivity(
                 Intent(requireContext(), PlaybackActivity::class.java).apply {
                     putExtra(DetailsActivity.MOVIE, movie)

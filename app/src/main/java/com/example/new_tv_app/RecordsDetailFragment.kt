@@ -20,6 +20,7 @@ import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.RecordsDaySlot
 import com.example.new_tv_app.iptv.XtreamLiveApi
@@ -252,14 +253,28 @@ class RecordsDetailFragment : Fragment() {
                 val sid = selectedStreamId
                 if (sid.isNotEmpty()) {
                     val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
+                    val channelName =
+                        barStreams.find { it.streamId == sid }?.name
+                    val timeRange = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+                    val tag = listing.category
+                    val imageUrl = listing.imageUrl ?: barStreams.find { it.streamId == sid }?.iconUrl
                     val movie = Movie(
                         id = listing.startUnix xor listing.endUnix,
                         title = listing.title,
-                        description = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix),
-                        backgroundImageUrl = listing.imageUrl,
-                        cardImageUrl = listing.imageUrl,
+                        description = timeRange,
+                        backgroundImageUrl = imageUrl,
+                        cardImageUrl = imageUrl,
                         videoUrl = url,
                         studio = listing.category,
+                    )
+                    LastWatchStore.addRecords(
+                        context = requireContext(),
+                        playedUnixSeconds = IptvTimeUtils.nowIsraelSeconds(),
+                        channelName = channelName,
+                        tag = tag,
+                        timeRange = timeRange,
+                        imageUrl = imageUrl,
+                        movie = movie,
                     )
                     startActivity(
                         Intent(requireContext(), PlaybackActivity::class.java).apply {

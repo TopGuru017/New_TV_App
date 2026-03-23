@@ -36,6 +36,14 @@
     <string name="sidebar_settings">SETTINGS</string>
     <string name="home_content_placeholder">IPTV — main content</string>
 
+    <!-- Last watch (Home) -->
+    <string name="last_watch_title">last watch</string>
+    <string name="last_watch_edit">Edit</string>
+    <string name="last_watch_header_records">RECORDS</string>
+    <string name="last_watch_header_vod_series">VOD - SERIES</string>
+    <string name="last_watch_header_vod_movies">VOD - MOVIES</string>
+    <string name="last_watch_empty">No watch history yet</string>
+
     <!-- Search -->
     <string name="search_placeholder">Type search keywords here…</string>
     <string name="search_keyboard_space">Space</string>

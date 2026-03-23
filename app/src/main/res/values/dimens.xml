@@ -44,4 +44,18 @@
     <dimen name="search_recording_card_width">108dp</dimen>
     <dimen name="search_vod_strip_width">140dp</dimen>
     <dimen name="search_vod_poster_height">118dp</dimen>
+
+    <!-- Last watch -->
+    <dimen name="last_watch_padding_start">24dp</dimen>
+    <dimen name="last_watch_padding_top">20dp</dimen>
+    <dimen name="last_watch_padding_end">24dp</dimen>
+    <dimen name="last_watch_padding_bottom">16dp</dimen>
+    <!-- Category cards in Last Watch (RECORDS / VOD SERIES / VOD MOVIES) -->
+    <dimen name="last_watch_category_card_width">220dp</dimen>
+    <dimen name="last_watch_record_card_width">@dimen/last_watch_category_card_width</dimen>
+    <dimen name="last_watch_record_card_height">130dp</dimen>
+    <dimen name="last_watch_record_card_text_gap">8dp</dimen>
+    <dimen name="last_watch_vod_big_width">@dimen/last_watch_category_card_width</dimen>
+    <dimen name="last_watch_vod_big_height">@dimen/last_watch_record_card_height</dimen>
+    <dimen name="last_watch_section_header_margin_top">18dp</dimen>
 </resources>
