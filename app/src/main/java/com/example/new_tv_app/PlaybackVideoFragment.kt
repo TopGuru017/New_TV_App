@@ -15,7 +15,12 @@ import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
-/** Plays VOD and live IPTV via LibVLC (handles redirects / HLS / odd servers better than MediaPlayer / ExoPlayer defaults). */
+/**
+ * Plays VOD and live IPTV via LibVLC (handles redirects / HLS / odd servers better than MediaPlayer / ExoPlayer defaults).
+ *
+ * Many Xtream-style panels respond with **302** to a CDN/origin that checks **Referer** and/or rejects the default **VLC/x.x**
+ * user-agent; the redirected request then returns **403** unless we send a panel **Referer** and a browser-like **User-Agent**.
+ */
 class PlaybackVideoFragment : Fragment() {
 
     private var libVLC: LibVLC? = null
@@ -94,6 +99,7 @@ class PlaybackVideoFragment : Fragment() {
         player.attachViews(videoLayout, null, false, false)
 
         val media = Media(vlc, Uri.parse(url))
+        applyPanelFriendlyHttpOptions(media, url)
         Log.d(TAG, "Media created, binding to player")
         player.media = media
         media.release()
@@ -123,6 +129,21 @@ class PlaybackVideoFragment : Fragment() {
 
     private companion object {
         const val TAG = "PlaybackVLC"
+
+        /**
+         * Panel **Referer** (scheme + host) and a TV **Chrome** user-agent for HTTP(S), including after redirects.
+         */
+        fun applyPanelFriendlyHttpOptions(media: Media, streamUrl: String) {
+            val u = Uri.parse(streamUrl)
+            val scheme = u.scheme?.lowercase() ?: return
+            val host = u.host ?: return
+            if (scheme != "http" && scheme != "https") return
+            val origin = "$scheme://$host/"
+            media.addOption(":http-referrer=$origin")
+            media.addOption(
+                ":http-user-agent=Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            )
+        }
 
         /** Logs host + stream id only (path contains credentials for Xtream-style URLs). */
         fun logPlaybackTarget(url: String, title: String?) {
