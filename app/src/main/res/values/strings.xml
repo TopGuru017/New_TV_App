@@ -36,6 +36,21 @@
     <string name="sidebar_settings">SETTINGS</string>
     <string name="home_content_placeholder">IPTV — main content</string>
 
+    <!-- Search -->
+    <string name="search_placeholder">Type search keywords here…</string>
+    <string name="search_keyboard_space">Space</string>
+    <string name="search_keyboard_123">123</string>
+    <string name="search_keyboard_search">Search</string>
+    <string name="search_clear_history">Clear search history</string>
+    <string name="search_loading_catalog">Loading catalog…</string>
+    <string name="search_error_catalog">Could not load catalog. Try again.</string>
+    <string name="search_results_empty">No movies or series match your search.</string>
+    <string name="search_hint_run">Select Search on the keyboard or press Enter.</string>
+    <string name="search_badge_movie">Movie</string>
+    <string name="search_badge_series">Series</string>
+    <string name="search_cd_globe">Switch letter case</string>
+    <string name="search_cd_backspace">Backspace</string>
+
     <!-- Profile screen -->
     <string name="profile_screen_title">My Profile</string>
     <string name="profile_label_username">Username</string>

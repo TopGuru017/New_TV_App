@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="wrap_content"
+    android:layout_height="@dimen/search_history_row_height"
+    android:layout_marginEnd="10dp"
+    android:background="@drawable/bg_search_history_pill"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp">
+
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:contentDescription="@null"
+        android:duplicateParentState="true"
+        android:src="@drawable/ic_sidebar_history"
+        android:tint="@color/sidebar_text_primary" />
+
+    <TextView
+        android:id="@+id/search_history_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/sidebar_text_primary"
+        android:textSize="13sp"
+        tools:text="sports" />
+</LinearLayout>

@@ -40,6 +40,50 @@ object XtreamVodApi {
         }
     }
 
+    /**
+     * All VOD movies for search: tries `get_vod_streams` without category, then aggregates categories if empty.
+     */
+    suspend fun fetchAllVodStreamsForSearch(): Result<List<VodMovieItem>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val direct = runCatching {
+                parseVodStreams(parseArray(get("get_vod_streams")))
+            }.getOrElse { emptyList() }
+            if (direct.isNotEmpty()) return@runCatching direct
+            val cats = fetchVodCategories().getOrThrow()
+            val seen = LinkedHashSet<String>()
+            val merged = ArrayList<VodMovieItem>()
+            for (c in cats) {
+                val list = fetchVodStreams(c.id).getOrElse { emptyList() }
+                for (m in list) {
+                    if (seen.add(m.streamId)) merged.add(m)
+                }
+            }
+            merged
+        }
+    }
+
+    /**
+     * All series for search: tries `get_series` without category, then aggregates categories if empty.
+     */
+    suspend fun fetchAllSeriesForSearch(): Result<List<SeriesShow>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val direct = runCatching {
+                parseSeriesList(parseArray(get("get_series")))
+            }.getOrElse { emptyList() }
+            if (direct.isNotEmpty()) return@runCatching direct
+            val cats = fetchSeriesCategories().getOrThrow()
+            val seen = LinkedHashSet<String>()
+            val merged = ArrayList<SeriesShow>()
+            for (c in cats) {
+                val list = fetchSeries(c.id).getOrElse { emptyList() }
+                for (s in list) {
+                    if (seen.add(s.seriesId)) merged.add(s)
+                }
+            }
+            merged
+        }
+    }
+
     /** First playable episode id + extension for [IptvStreamUrls.seriesEpisodeUrl]. */
     suspend fun fetchFirstSeriesEpisode(seriesId: String): Result<Pair<String, String>> = withContext(Dispatchers.IO) {
         runCatching {

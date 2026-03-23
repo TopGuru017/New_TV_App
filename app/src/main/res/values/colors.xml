@@ -27,4 +27,10 @@
     <color name="settings_card_stroke">#00BCD4</color>
 
     <color name="login_scrim">#B3000000</color>
+
+    <!-- Search screen (mock: dark gray field, translucent pills, outline-only clear) -->
+    <color name="search_field_fill">#2C2C2C</color>
+    <color name="search_field_stroke">@color/sidebar_accent_cyan</color>
+    <color name="search_history_pill_fill">#992A2A2A</color>
+    <color name="search_divider">#28FFFFFF</color>
 </resources>

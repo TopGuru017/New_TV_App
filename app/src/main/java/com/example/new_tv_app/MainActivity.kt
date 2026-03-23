@@ -23,6 +23,12 @@ class MainActivity : FragmentActivity() {
             getString(R.string.profile_display_name)
         }
         sidebar.setProfileDisplayName(displayName.uppercase(Locale.getDefault()))
+        sidebar.setOnSearchClickListener {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.main_content, SearchFragment())
+                .addToBackStack(null)
+                .commit()
+        }
         sidebar.setOnLiveClickListener {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, LiveTvFragment())

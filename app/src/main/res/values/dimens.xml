@@ -33,4 +33,11 @@
     <!-- TV Guide -->
     <dimen name="tv_guide_channel_column_width">140dp</dimen>
     <dimen name="tv_guide_program_spacing">10dp</dimen>
+
+    <!-- Search -->
+    <dimen name="search_field_min_height">52dp</dimen>
+    <dimen name="search_keyboard_key_padding_h_compact">2dp</dimen>
+    <dimen name="search_keyboard_key_padding_h_wide">6dp</dimen>
+    <dimen name="search_keyboard_row_height">56dp</dimen>
+    <dimen name="search_history_row_height">48dp</dimen>
 </resources>

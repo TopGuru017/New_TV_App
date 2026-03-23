@@ -137,6 +137,10 @@ class IptvSidebarView @JvmOverloads constructor(
         profileRow.setOnClickListener(listener)
     }
 
+    fun setOnSearchClickListener(listener: OnClickListener?) {
+        rowSearch.setOnClickListener(listener)
+    }
+
     fun setOnLiveClickListener(listener: OnClickListener?) {
         rowLive.setOnClickListener(listener)
     }
