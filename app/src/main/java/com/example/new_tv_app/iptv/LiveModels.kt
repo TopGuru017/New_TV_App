@@ -11,6 +11,8 @@ data class LiveStream(
     val iconUrl: String?,
     val categoryId: String?,
     val epgChannelId: String?,
+    /** Xtream `tv_archive` — channel offers catch-up / TV archive. */
+    val tvArchive: Boolean = false,
 )
 
 data class EpgListing(

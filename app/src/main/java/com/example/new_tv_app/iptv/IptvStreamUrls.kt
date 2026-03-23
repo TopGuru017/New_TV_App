@@ -33,4 +33,18 @@ object IptvStreamUrls {
         val ext = containerExtension.trim().removePrefix(".").ifBlank { "mp4" }
         return "$base/series/$u/$p/$id.$ext"
     }
+
+    /**
+     * Xtream-style catch-up URL. [durationSeconds] is often required by panels (clip length).
+     * If your panel expects minutes instead, adjust the caller.
+     */
+    fun timeshiftStreamUrl(streamId: String, startUnix: Long, endUnix: Long): String {
+        val base = IptvCredentials.baseUrl().trimEnd('/')
+        val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
+        val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
+        val id = streamId.trim().trimStart('/')
+        val durationSec = (endUnix - startUnix).toInt().coerceIn(60, 8 * 3600)
+        val startFmt = IptvTimeUtils.formatTimeshiftStartIsrael(startUnix)
+        return "$base/timeshift/$u/$p/$durationSec/$startFmt/$id.m3u8"
+    }
 }

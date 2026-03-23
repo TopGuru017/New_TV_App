@@ -157,6 +157,16 @@
     <string name="login_qr_toast">QR login is not available yet.</string>
     <string name="login_reset_toast">Use your provider’s site to reset your password.</string>
 
+    <!-- Records (TV archive / catch-up) -->
+    <string name="records_screen_title">Records</string>
+    <string name="records_category_all">ALL</string>
+    <string name="records_header_fmt">Records - %1$s</string>
+    <string name="records_empty_channels">No archive channels in this category</string>
+    <string name="records_empty_programs">No recordings for this day</string>
+    <string name="records_load_error">Could not load archive channels. Check connection.</string>
+    <string name="records_epg_error">Could not load programme list.</string>
+    <string name="records_cd_play">Play recording</string>
+
     <!-- TV Guide -->
     <string name="tv_guide_title">TV guide</string>
     <string name="tv_guide_reminders">Reminders</string>

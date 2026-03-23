@@ -58,6 +58,10 @@ object XtreamLiveApi {
         }
     }
 
+    /** Live streams with Xtream `tv_archive` enabled (catch-up / recordings). */
+    suspend fun fetchTvArchiveStreams(): Result<List<LiveStream>> =
+        fetchAllLiveStreamsForSearch().map { streams -> streams.filter { it.tvArchive } }
+
     suspend fun fetchShortEpg(streamId: String): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
         runCatching {
             parseEpgListings(
@@ -71,6 +75,21 @@ object XtreamLiveApi {
         runCatching {
             parseEpgListings(
                 get("get_short_epg", "stream_id" to streamId, "limit" to limit.toString())
+            )
+        }
+    }
+
+    /**
+     * Long EPG / archive table for a stream. Tries `get_simple_data_table`, then falls back to a large `get_short_epg`.
+     */
+    suspend fun fetchArchiveEpgTable(streamId: String): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val table = runCatching {
+                parseEpgListingsFlexible(get("get_simple_data_table", "stream_id" to streamId))
+            }.getOrElse { emptyList() }
+            if (table.isNotEmpty()) return@runCatching table
+            parseEpgListings(
+                get("get_short_epg", "stream_id" to streamId, "limit" to "500"),
             )
         }
     }
@@ -133,6 +152,11 @@ object XtreamLiveApi {
             val icon = o.optString("stream_icon").trim().takeIf { it.isNotEmpty() }
             val cat = o.optString("category_id").trim().takeIf { it.isNotEmpty() }
             val epg = o.optString("epg_channel_id").trim().takeIf { it.isNotEmpty() }
+            val archive = when {
+                o.optInt("tv_archive", 0) == 1 -> true
+                o.optString("tv_archive").equals("1", ignoreCase = true) -> true
+                else -> false
+            }
             out.add(
                 LiveStream(
                     streamId = id,
@@ -140,26 +164,38 @@ object XtreamLiveApi {
                     iconUrl = icon,
                     categoryId = cat,
                     epgChannelId = epg,
+                    tvArchive = archive,
                 )
             )
         }
         return out
     }
 
-    private fun parseEpgListings(json: String): List<EpgListing> {
+    private fun parseEpgListingsFlexible(json: String): List<EpgListing> {
         val t = json.trim()
+        if (t.startsWith("[")) {
+            return parseEpgListingsFromArray(JSONArray(t))
+        }
         if (!t.startsWith("{")) return emptyList()
         val root = JSONObject(t)
-        val arr = root.optJSONArray("epg_listings") ?: return emptyList()
+        root.optJSONArray("epg_listings")?.let { return parseEpgListingsFromArray(it) }
+        root.optJSONArray("listings")?.let { return parseEpgListingsFromArray(it) }
+        root.optJSONArray("programs")?.let { return parseEpgListingsFromArray(it) }
+        root.optJSONArray("data")?.let { return parseEpgListingsFromArray(it) }
+        return emptyList()
+    }
+
+    private fun parseEpgListingsFromArray(arr: JSONArray): List<EpgListing> {
         val out = ArrayList<EpgListing>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val title = o.optString("title").ifBlank { continue }
+            val title = o.optString("title").ifBlank { o.optString("name") }
+            if (title.isBlank()) continue
             val desc = o.optString("description").trim()
             val cat = o.optString("category_name").trim().takeIf { it.isNotEmpty() }
                 ?: o.optString("category").trim().takeIf { it.isNotEmpty() }
-            val start = readUnix(o, "start_timestamp", "start")
-            val end = readUnix(o, "stop_timestamp", "end_timestamp", "stop", "end")
+            val start = readUnix(o, "start_timestamp", "start", "start_time")
+            val end = readUnix(o, "stop_timestamp", "end_timestamp", "stop", "end", "end_time")
             if (start <= 0L || end <= 0L || end <= start) continue
             val img = o.optString("cover").trim().takeIf { it.isNotEmpty() }
                 ?: o.optString("image").trim().takeIf { it.isNotEmpty() }
@@ -176,6 +212,14 @@ object XtreamLiveApi {
             )
         }
         return out
+    }
+
+    private fun parseEpgListings(json: String): List<EpgListing> {
+        val t = json.trim()
+        if (!t.startsWith("{")) return emptyList()
+        val root = JSONObject(t)
+        val arr = root.optJSONArray("epg_listings") ?: return emptyList()
+        return parseEpgListingsFromArray(arr)
     }
 
     private fun readUnix(o: JSONObject, vararg keys: String): Long {
