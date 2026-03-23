@@ -33,4 +33,6 @@
     <color name="search_field_stroke">@color/sidebar_accent_cyan</color>
     <color name="search_history_pill_fill">#992A2A2A</color>
     <color name="search_divider">#28FFFFFF</color>
+    <color name="search_query_highlight">#FFEB3B</color>
+    <color name="search_recording_tile_fill">#383838</color>
 </resources>

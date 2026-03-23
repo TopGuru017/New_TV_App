@@ -3,7 +3,10 @@ package com.example.new_tv_app
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Bundle
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextUtils
+import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -15,34 +18,31 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
+import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.IptvStreamUrls
+import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.SearchHistoryStore
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.XtreamLiveApi
 import com.example.new_tv_app.iptv.XtreamVodApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.Locale
 
-private const val SEARCH_GRID_SPAN = 6
 private const val MAX_QUERY_LEN = 256
-private const val MAX_RESULTS_PER_TYPE = 40
-
-private sealed class SearchResultEntry {
-    data class MovieHit(val item: VodMovieItem) : SearchResultEntry()
-    data class SeriesHit(val item: SeriesShow) : SearchResultEntry()
-}
+private const val MAX_RECORDINGS_ROW = 30
+private const val MAX_VOD_ROW = 40
 
 /**
- * TV search: query field, single-row on-screen keyboard (globe / 123 / space / a–z / search / backspace),
- * results grid, history chips and clear (matches product layout).
+ * TV search: keyboard, then horizontal rows — recordings (live channels), VOD series, VOD movies.
  */
 class SearchFragment : Fragment() {
 
@@ -50,6 +50,7 @@ class SearchFragment : Fragment() {
     private var numericKeyboard = false
     private var upperCaseLetters = false
 
+    private var allLive: List<LiveStream>? = null
     private var allMovies: List<VodMovieItem>? = null
     private var allShows: List<SeriesShow>? = null
 
@@ -57,19 +58,47 @@ class SearchFragment : Fragment() {
     private lateinit var keyboardRow: LinearLayout
     private lateinit var historyRow: LinearLayout
     private lateinit var clearHistory: TextView
-    private lateinit var resultsRv: RecyclerView
-    private lateinit var resultsEmpty: TextView
+    private lateinit var resultsScroll: NestedScrollView
     private lateinit var resultsHint: TextView
-    private lateinit var catalogLoading: ProgressBar
+    private lateinit var resultsEmpty: TextView
+    private lateinit var headerRecordings: TextView
+    private lateinit var headerSeries: TextView
+    private lateinit var headerMovies: TextView
+    private lateinit var rvRecordings: RecyclerView
+    private lateinit var rvSeries: RecyclerView
+    private lateinit var rvMovies: RecyclerView
 
     private val sidebarAnchorId = R.id.row_search
-    private val resultsAdapter = SearchResultsAdapter(
-        onMovie = { m -> playMovie(m) },
-        onSeries = { s -> playSeries(s) },
+
+    private val recordingsAdapter = SearchRecordingAdapter(
         sidebarAnchorId = sidebarAnchorId,
-        spanCount = SEARCH_GRID_SPAN,
-        focusUpId = R.id.search_clear_history,
+        focusUpIdProvider = { keyboardLastView()?.id ?: View.NO_ID },
+        queryProvider = { lastSearchQuery },
+        onPlay = { playLive(it) },
+        onRequestFocusNextRow = { focusFirstInRecyclerView(rvSeries) || focusFirstInRecyclerView(rvMovies) },
     )
+    private val seriesAdapter = SearchVodStripAdapter<SeriesShow>(
+        sidebarAnchorId = sidebarAnchorId,
+        focusUpIdProvider = { keyboardLastView()?.id ?: View.NO_ID },
+        queryProvider = { lastSearchQuery },
+        loadPoster = { iv, url -> loadPoster(iv, url) },
+        nameGetter = { it.name },
+        posterGetter = { it.coverUrl },
+        onPick = { playSeries(it) },
+        onRequestFocusNextRow = { focusFirstInRecyclerView(rvMovies) },
+    )
+    private val moviesAdapter = SearchVodStripAdapter<VodMovieItem>(
+        sidebarAnchorId = sidebarAnchorId,
+        focusUpIdProvider = { keyboardLastView()?.id ?: View.NO_ID },
+        queryProvider = { lastSearchQuery },
+        loadPoster = { iv, url -> loadPoster(iv, url) },
+        nameGetter = { it.name },
+        posterGetter = { it.coverUrl },
+        onPick = { playMovie(it) },
+        onRequestFocusNextRow = { false },
+    )
+
+    private var lastSearchQuery: String = ""
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -84,18 +113,21 @@ class SearchFragment : Fragment() {
         keyboardRow = view.findViewById(R.id.search_keyboard_row)
         historyRow = view.findViewById(R.id.search_history_row)
         clearHistory = view.findViewById(R.id.search_clear_history)
-        resultsRv = view.findViewById(R.id.search_results_list)
-        resultsEmpty = view.findViewById(R.id.search_results_empty)
+        resultsScroll = view.findViewById(R.id.search_results_scroll)
         resultsHint = view.findViewById(R.id.search_results_hint)
-        catalogLoading = view.findViewById(R.id.search_catalog_loading)
+        resultsEmpty = view.findViewById(R.id.search_results_empty)
+        headerRecordings = view.findViewById(R.id.search_header_recordings)
+        headerSeries = view.findViewById(R.id.search_header_series)
+        headerMovies = view.findViewById(R.id.search_header_movies)
+        rvRecordings = view.findViewById(R.id.search_rv_recordings)
+        rvSeries = view.findViewById(R.id.search_rv_series)
+        rvMovies = view.findViewById(R.id.search_rv_movies)
+        val catalogLoading = view.findViewById<ProgressBar>(R.id.search_catalog_loading)
 
-        val spacing = resources.getDimensionPixelSize(R.dimen.live_grid_spacing)
-        resultsRv.layoutManager = GridLayoutManager(requireContext(), SEARCH_GRID_SPAN)
-        resultsRv.adapter = resultsAdapter
-        resultsRv.addItemDecoration(SearchGridSpacingItemDecoration(SEARCH_GRID_SPAN, spacing))
-        resultsRv.setHasFixedSize(true)
-        resultsRv.itemAnimator = null
-        resultsRv.nextFocusDownId = clearHistory.id
+        val gap = resources.getDimensionPixelSize(R.dimen.live_grid_spacing)
+        setupHorizontalRv(rvRecordings, recordingsAdapter, gap)
+        setupHorizontalRv(rvSeries, seriesAdapter, gap)
+        setupHorizontalRv(rvMovies, moviesAdapter, gap)
 
         val mainContent = requireActivity().findViewById<View>(R.id.main_content)
         val savedMainNextFocusLeft = mainContent.nextFocusLeftId
@@ -114,6 +146,10 @@ class SearchFragment : Fragment() {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                     focusFirstKeyboardKey()
                     true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    searchQuery.nextFocusUpId = sidebarAnchorId
+                    false
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
@@ -136,43 +172,52 @@ class SearchFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             catalogLoading.isVisible = true
+            val dl = async { XtreamLiveApi.fetchAllLiveStreamsForSearch() }
             val dm = async { XtreamVodApi.fetchAllVodStreamsForSearch() }
             val ds = async { XtreamVodApi.fetchAllSeriesForSearch() }
+            val lr = dl.await()
             val mr = dm.await()
             val sr = ds.await()
             if (!isAdded) return@launch
             catalogLoading.isVisible = false
-            mr.fold(
-                onSuccess = { allMovies = it },
-                onFailure = {
-                    allMovies = emptyList()
-                    Toast.makeText(
-                        requireContext(),
-                        R.string.search_error_catalog,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-            )
-            sr.fold(
-                onSuccess = { allShows = it },
-                onFailure = {
-                    allShows = emptyList()
-                    Toast.makeText(
-                        requireContext(),
-                        R.string.search_error_catalog,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-            )
+            lr.fold(onSuccess = { allLive = it }, onFailure = { allLive = emptyList() })
+            mr.fold(onSuccess = { allMovies = it }, onFailure = { allMovies = emptyList() })
+            sr.fold(onSuccess = { allShows = it }, onFailure = { allShows = emptyList() })
+            if (lr.isFailure || mr.isFailure || sr.isFailure) {
+                Toast.makeText(requireContext(), R.string.search_error_catalog, Toast.LENGTH_SHORT).show()
+            }
         }
 
         searchQuery.post { if (isAdded) searchQuery.requestFocus() }
     }
 
+    private fun setupHorizontalRv(rv: RecyclerView, adapter: RecyclerView.Adapter<*>, gapPx: Int) {
+        rv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        rv.adapter = adapter
+        rv.setHasFixedSize(true)
+        rv.itemAnimator = null
+        rv.addItemDecoration(SearchHorizontalGapDecoration(gapPx))
+    }
+
+    private fun keyboardLastView(): View? =
+        keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1)
+
     private fun focusFirstKeyboardKey() {
-        if (keyboardRow.childCount > 0) {
-            keyboardRow.getChildAt(0).requestFocus()
+        if (keyboardRow.childCount > 0) keyboardRow.getChildAt(0).requestFocus()
+    }
+
+    private fun focusFirstSearchResult(): Boolean =
+        focusFirstInRecyclerView(rvRecordings) ||
+            focusFirstInRecyclerView(rvSeries) ||
+            focusFirstInRecyclerView(rvMovies)
+
+    private fun focusFirstInRecyclerView(rv: RecyclerView): Boolean {
+        if (!rv.isVisible || rv.adapter == null || rv.adapter!!.itemCount <= 0) return false
+        rv.scrollToPosition(0)
+        rv.post {
+            rv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
         }
+        return true
     }
 
     private fun appendChar(ch: String) {
@@ -215,13 +260,7 @@ class SearchFragment : Fragment() {
         val slots = mutableListOf<Slot>()
 
         slots += Slot(
-            makeIconKey(
-                ctx,
-                R.drawable.ic_search_globe,
-                R.string.search_cd_globe,
-                padCompact,
-                iconPadV,
-            ) { toggleCase() },
+            makeIconKey(ctx, R.drawable.ic_search_globe, R.string.search_cd_globe, padCompact, iconPadV) { toggleCase() },
             1f,
         )
         slots += Slot(
@@ -256,13 +295,7 @@ class SearchFragment : Fragment() {
             2.2f,
         )
         slots += Slot(
-            makeIconKey(
-                ctx,
-                R.drawable.ic_search_backspace,
-                R.string.search_cd_backspace,
-                padCompact,
-                iconPadV,
-            ) { backspace() },
+            makeIconKey(ctx, R.drawable.ic_search_backspace, R.string.search_cd_backspace, padCompact, iconPadV) { backspace() },
             1.15f,
         )
 
@@ -279,6 +312,9 @@ class SearchFragment : Fragment() {
 
         searchQuery.nextFocusDownId = keys.first().id
         wireVerticalFocusFromKeyboard(keys.last())
+        recordingsAdapter.notifyDataSetChanged()
+        seriesAdapter.notifyDataSetChanged()
+        moviesAdapter.notifyDataSetChanged()
     }
 
     private fun wireVerticalFocusFromKeyboard(lastKey: View) {
@@ -314,7 +350,7 @@ class SearchFragment : Fragment() {
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusFirstHistoryOrClear()
+                        focusFirstSearchResult() || focusFirstHistoryOrClear()
                         true
                     }
                     else -> false
@@ -350,7 +386,7 @@ class SearchFragment : Fragment() {
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusFirstHistoryOrClear()
+                        focusFirstSearchResult() || focusFirstHistoryOrClear()
                         true
                     }
                     else -> false
@@ -359,12 +395,10 @@ class SearchFragment : Fragment() {
         }
     }
 
-    private fun focusFirstHistoryOrClear() {
-        if (historyRow.childCount > 0) {
-            historyRow.getChildAt(0).requestFocus()
-        } else {
-            clearHistory.requestFocus()
-        }
+    private fun focusFirstHistoryOrClear(): Boolean {
+        if (historyRow.childCount > 0) historyRow.getChildAt(0).requestFocus()
+        else clearHistory.requestFocus()
+        return true
     }
 
     private fun refreshHistoryStrip(lastKeyboardKey: View? = null) {
@@ -375,9 +409,7 @@ class SearchFragment : Fragment() {
         for (text in items) {
             val chip = inflater.inflate(R.layout.item_search_history, historyRow, false)
             chip.findViewById<TextView>(R.id.search_history_label).text = text
-            chip.setOnClickListener {
-                applyHistoryQuery(text)
-            }
+            chip.setOnClickListener { applyHistoryQuery(text) }
             chip.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 when (keyCode) {
@@ -389,16 +421,11 @@ class SearchFragment : Fragment() {
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        (lastKeyboardKey ?: keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1))?.requestFocus()
+                        (lastKeyboardKey ?: keyboardLastView())?.requestFocus()
                         true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        if (resultsAdapter.itemCount > 0) {
-                            resultsRv.scrollToPosition(0)
-                            resultsRv.post {
-                                resultsRv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                            }
-                        }
+                        focusFirstSearchResult()
                         true
                     }
                     else -> false
@@ -410,46 +437,32 @@ class SearchFragment : Fragment() {
         }
 
         chips.forEachIndexed { i, chip ->
-            chip.nextFocusLeftId = if (i == 0) {
-                sidebarAnchorId
-            } else {
-                chips[i - 1].id
-            }
+            chip.nextFocusLeftId = if (i == 0) sidebarAnchorId else chips[i - 1].id
             chip.nextFocusRightId = if (i == chips.lastIndex) clearHistory.id else chips[i + 1].id
         }
 
-        clearHistory.nextFocusUpId =
-            (lastKeyboardKey ?: keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1))?.id
-                ?: searchQuery.id
+        clearHistory.nextFocusUpId = (lastKeyboardKey ?: keyboardLastView())?.id ?: searchQuery.id
         clearHistory.nextFocusLeftId =
-            chips.lastOrNull()?.id
-                ?: (lastKeyboardKey ?: keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1))?.id
-                ?: searchQuery.id
+            chips.lastOrNull()?.id ?: (lastKeyboardKey ?: keyboardLastView())?.id ?: searchQuery.id
 
         clearHistory.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    (lastKeyboardKey ?: keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1))?.requestFocus()
+                    (lastKeyboardKey ?: keyboardLastView())?.requestFocus()
                     true
                 }
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (resultsAdapter.itemCount > 0) {
-                        resultsRv.scrollToPosition(0)
-                        resultsRv.post {
-                            resultsRv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                        }
-                    }
+                    focusFirstSearchResult()
                     true
                 }
                 else -> false
             }
         }
 
-        val lastKey = lastKeyboardKey ?: keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1)
+        val lastKey = lastKeyboardKey ?: keyboardLastView()
         if (lastKey != null) {
-            lastKey.nextFocusDownId =
-                if (chips.isNotEmpty()) chips.first().id else clearHistory.id
+            lastKey.nextFocusDownId = if (chips.isNotEmpty()) chips.first().id else clearHistory.id
         }
     }
 
@@ -465,31 +478,80 @@ class SearchFragment : Fragment() {
 
     private fun runSearch() {
         val q = queryBuilder.toString().trim()
+        lastSearchQuery = q
         if (q.isEmpty()) {
-            resultsAdapter.submit(emptyList())
-            resultsRv.isVisible = false
-            resultsEmpty.isVisible = false
+            headerRecordings.isVisible = false
+            headerSeries.isVisible = false
+            headerMovies.isVisible = false
+            rvRecordings.isVisible = false
+            rvSeries.isVisible = false
+            rvMovies.isVisible = false
+            recordingsAdapter.submit(emptyList())
+            seriesAdapter.submit(emptyList())
+            moviesAdapter.submit(emptyList())
             resultsHint.isVisible = true
+            resultsEmpty.isVisible = false
             return
         }
         SearchHistoryStore.addQuery(requireContext(), q)
-        refreshHistoryStrip(keyboardRow.getChildAtOrNull(keyboardRow.childCount - 1))
+        refreshHistoryStrip(keyboardLastView())
 
-        val ql = q.lowercase(Locale.getDefault())
-        val movies = allMovies.orEmpty()
-            .filter { it.name.lowercase(Locale.getDefault()).contains(ql) }
-            .take(MAX_RESULTS_PER_TYPE)
-            .map { SearchResultEntry.MovieHit(it) }
+        val loc = Locale.getDefault()
+        val ql = q.lowercase(loc)
+        val recordings = allLive.orEmpty()
+            .filter { it.name.lowercase(loc).contains(ql) }
+            .take(MAX_RECORDINGS_ROW)
         val series = allShows.orEmpty()
-            .filter { it.name.lowercase(Locale.getDefault()).contains(ql) }
-            .take(MAX_RESULTS_PER_TYPE)
-            .map { SearchResultEntry.SeriesHit(it) }
+            .filter { it.name.lowercase(loc).contains(ql) }
+            .take(MAX_VOD_ROW)
+        val movies = allMovies.orEmpty()
+            .filter { it.name.lowercase(loc).contains(ql) }
+            .take(MAX_VOD_ROW)
 
-        val combined = movies + series
-        resultsAdapter.submit(combined)
+        recordingsAdapter.submit(recordings)
+        seriesAdapter.submit(series)
+        moviesAdapter.submit(movies)
+
+        headerRecordings.text = getString(R.string.search_recordings_found, recordings.size)
+        headerRecordings.isVisible = recordings.isNotEmpty()
+        rvRecordings.isVisible = recordings.isNotEmpty()
+
+        headerSeries.isVisible = series.isNotEmpty()
+        rvSeries.isVisible = series.isNotEmpty()
+
+        headerMovies.isVisible = movies.isNotEmpty()
+        rvMovies.isVisible = movies.isNotEmpty()
+
+        val any = recordings.isNotEmpty() || series.isNotEmpty() || movies.isNotEmpty()
         resultsHint.isVisible = false
-        resultsRv.isVisible = combined.isNotEmpty()
-        resultsEmpty.isVisible = combined.isEmpty()
+        resultsEmpty.isVisible = !any
+    }
+
+    private fun loadPoster(iv: ImageView, url: String?) {
+        if (url.isNullOrBlank()) {
+            Glide.with(iv).clear(iv)
+            iv.setImageDrawable(null)
+        } else {
+            Glide.with(iv).load(url).centerCrop().into(iv)
+        }
+    }
+
+    private fun playLive(stream: LiveStream) {
+        val url = IptvStreamUrls.liveStreamUrl(stream.streamId)
+        val movie = Movie(
+            id = stream.streamId.hashCode().toLong(),
+            title = stream.name,
+            description = getString(R.string.search_badge_live),
+            backgroundImageUrl = stream.iconUrl,
+            cardImageUrl = stream.iconUrl,
+            videoUrl = url,
+            studio = null,
+        )
+        startActivity(
+            Intent(requireContext(), PlaybackActivity::class.java).apply {
+                putExtra(DetailsActivity.MOVIE, movie)
+            },
+        )
     }
 
     private fun playMovie(m: VodMovieItem) {
@@ -544,11 +606,28 @@ class SearchFragment : Fragment() {
     }
 }
 
-private class SearchGridSpacingItemDecoration(
-    private val spanCount: Int,
-    private val spacingPx: Int,
-) : RecyclerView.ItemDecoration() {
+private fun buildHighlightedTitle(full: String, query: String, context: android.content.Context): CharSequence {
+    if (query.isBlank()) return full
+    val highlight = ContextCompat.getColor(context, R.color.search_query_highlight)
+    val ss = SpannableString(full)
+    val lowerFull = full.lowercase(Locale.getDefault())
+    val q = query.lowercase(Locale.getDefault())
+    var start = 0
+    while (start <= lowerFull.length - q.length) {
+        val i = lowerFull.indexOf(q, start)
+        if (i < 0) break
+        ss.setSpan(
+            ForegroundColorSpan(highlight),
+            i,
+            i + q.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        start = i + q.length
+    }
+    return ss
+}
 
+private class SearchHorizontalGapDecoration(private val gapPx: Int) : RecyclerView.ItemDecoration() {
     override fun getItemOffsets(
         outRect: Rect,
         view: View,
@@ -557,25 +636,21 @@ private class SearchGridSpacingItemDecoration(
     ) {
         val pos = parent.getChildAdapterPosition(view)
         if (pos == RecyclerView.NO_POSITION) return
-        val col = pos % spanCount
-        outRect.left = spacingPx - col * spacingPx / spanCount
-        outRect.right = (col + 1) * spacingPx / spanCount
-        outRect.top = spacingPx / 2
-        outRect.bottom = spacingPx / 2
+        if (pos > 0) outRect.left = gapPx
     }
 }
 
-private class SearchResultsAdapter(
-    private val onMovie: (VodMovieItem) -> Unit,
-    private val onSeries: (SeriesShow) -> Unit,
+private class SearchRecordingAdapter(
     private val sidebarAnchorId: Int,
-    private val spanCount: Int,
-    private val focusUpId: Int,
-) : RecyclerView.Adapter<SearchResultsAdapter.VH>() {
+    private val focusUpIdProvider: () -> Int,
+    private val queryProvider: () -> String,
+    private val onPlay: (LiveStream) -> Unit,
+    private val onRequestFocusNextRow: () -> Boolean,
+) : RecyclerView.Adapter<SearchRecordingAdapter.VH>() {
 
-    private val items = mutableListOf<SearchResultEntry>()
+    private val items = mutableListOf<LiveStream>()
 
-    fun submit(list: List<SearchResultEntry>) {
+    fun submit(list: List<LiveStream>) {
         items.clear()
         items.addAll(list)
         notifyDataSetChanged()
@@ -584,72 +659,114 @@ private class SearchResultsAdapter(
     override fun getItemCount(): Int = items.size
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val v = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_live_channel, parent, false)
+        val v = LayoutInflater.from(parent.context).inflate(R.layout.item_search_recording, parent, false)
         return VH(v)
     }
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val col = position % spanCount
-        holder.itemView.nextFocusLeftId = if (col == 0) sidebarAnchorId else View.NO_ID
-        holder.itemView.nextFocusUpId = focusUpId
-        when (val e = items[position]) {
-            is SearchResultEntry.MovieHit -> {
-                val m = e.item
-                holder.name.text = m.name
-                holder.name.append("\n")
-                holder.name.append(holder.itemView.context.getString(R.string.search_badge_movie))
-                loadIcon(holder.icon, m.coverUrl)
-                holder.itemView.setOnClickListener { onMovie(m) }
-                holder.itemView.setOnKeyListener { _, keyCode, event ->
-                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                    when (keyCode) {
-                        KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_NUMPAD_ENTER,
-                        -> {
-                            onMovie(m)
-                            true
-                        }
-                        else -> false
-                    }
+        val stream = items[position]
+        holder.itemView.nextFocusLeftId = if (position == 0) sidebarAnchorId else View.NO_ID
+        holder.itemView.nextFocusUpId = focusUpIdProvider()
+
+        loadRecordingIcon(holder.icon, stream.iconUrl)
+        holder.name.text = buildHighlightedTitle(stream.name, queryProvider(), holder.itemView.context)
+        holder.idLine.text = holder.itemView.context.getString(R.string.search_result_id_fmt, stream.streamId)
+
+        val activate = {
+            onPlay(stream)
+        }
+        holder.itemView.setOnClickListener { activate() }
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    activate()
+                    true
                 }
-            }
-            is SearchResultEntry.SeriesHit -> {
-                val s = e.item
-                holder.name.text = s.name
-                holder.name.append("\n")
-                holder.name.append(holder.itemView.context.getString(R.string.search_badge_series))
-                loadIcon(holder.icon, s.coverUrl)
-                holder.itemView.setOnClickListener { onSeries(s) }
-                holder.itemView.setOnKeyListener { _, keyCode, event ->
-                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                    when (keyCode) {
-                        KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_NUMPAD_ENTER,
-                        -> {
-                            onSeries(s)
-                            true
-                        }
-                        else -> false
-                    }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (position == items.lastIndex) onRequestFocusNextRow() else false
                 }
+                else -> false
             }
         }
     }
 
-    private fun loadIcon(icon: ImageView, url: String?) {
+    private fun loadRecordingIcon(iv: ImageView, url: String?) {
         if (url.isNullOrBlank()) {
-            Glide.with(icon).clear(icon)
-            icon.setImageDrawable(null)
+            Glide.with(iv).clear(iv)
+            iv.setImageDrawable(null)
         } else {
-            Glide.with(icon).load(url).fitCenter().into(icon)
+            Glide.with(iv).load(url).fitCenter().into(iv)
         }
     }
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
-        val name: TextView = itemView.findViewById(R.id.live_channel_name)
+        val icon: ImageView = itemView.findViewById(R.id.search_recording_icon)
+        val name: TextView = itemView.findViewById(R.id.search_recording_name)
+        val idLine: TextView = itemView.findViewById(R.id.search_recording_id)
+    }
+}
+
+private class SearchVodStripAdapter<T : Any>(
+    private val sidebarAnchorId: Int,
+    private val focusUpIdProvider: () -> Int,
+    private val queryProvider: () -> String,
+    private val loadPoster: (ImageView, String?) -> Unit,
+    private val nameGetter: (T) -> String,
+    private val posterGetter: (T) -> String?,
+    private val onPick: (T) -> Unit,
+    private val onRequestFocusNextRow: () -> Boolean,
+) : RecyclerView.Adapter<SearchVodStripAdapter.VH>() {
+
+    private val items = mutableListOf<T>()
+
+    fun submit(list: List<T>) {
+        items.clear()
+        items.addAll(list)
+        notifyDataSetChanged()
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context).inflate(R.layout.item_search_vod_strip, parent, false)
+        return VH(v)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        holder.itemView.nextFocusLeftId = if (position == 0) sidebarAnchorId else View.NO_ID
+        holder.itemView.nextFocusUpId = focusUpIdProvider()
+
+        val ctx = holder.itemView.context
+        val q = queryProvider()
+        val lastIndex = itemCount - 1
+        val item = items[position]
+        loadPoster(holder.poster, posterGetter(item))
+        holder.title.text = buildHighlightedTitle(nameGetter(item), q, ctx)
+        holder.itemView.setOnClickListener { onPick(item) }
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    onPick(item)
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (position == lastIndex) onRequestFocusNextRow() else false
+                }
+                else -> false
+            }
+        }
+    }
+
+    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val poster: ImageView = itemView.findViewById(R.id.search_vod_poster)
+        val title: TextView = itemView.findViewById(R.id.search_vod_title)
     }
 }

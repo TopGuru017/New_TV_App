@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="@dimen/search_vod_strip_width"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_search_vod_strip_focus"
+    android:clickable="true"
+    android:focusable="true"
+    android:orientation="vertical"
+    android:padding="6dp">
+
+    <ImageView
+        android:id="@+id/search_vod_poster"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/search_vod_poster_height"
+        android:contentDescription="@null"
+        android:scaleType="centerCrop"
+        tools:src="@mipmap/ic_launcher" />
+
+    <TextView
+        android:id="@+id/search_vod_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:textColor="@color/sidebar_text_primary"
+        android:textSize="12sp"
+        tools:text="The NBA's Greatest Finals" />
+</LinearLayout>

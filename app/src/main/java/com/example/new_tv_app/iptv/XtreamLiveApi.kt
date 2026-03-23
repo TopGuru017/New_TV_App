@@ -36,6 +36,28 @@ object XtreamLiveApi {
         }
     }
 
+    /**
+     * All live streams for search: tries `get_live_streams` without category, then aggregates categories if empty.
+     */
+    suspend fun fetchAllLiveStreamsForSearch(): Result<List<LiveStream>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val direct = runCatching {
+                parseStreams(parseArray(get("get_live_streams")))
+            }.getOrElse { emptyList() }
+            if (direct.isNotEmpty()) return@runCatching direct
+            val cats = fetchLiveCategories().getOrThrow()
+            val seen = LinkedHashSet<String>()
+            val merged = ArrayList<LiveStream>()
+            for (c in cats) {
+                val list = fetchLiveStreams(c.id).getOrElse { emptyList() }
+                for (s in list) {
+                    if (seen.add(s.streamId)) merged.add(s)
+                }
+            }
+            merged
+        }
+    }
+
     suspend fun fetchShortEpg(streamId: String): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
         runCatching {
             parseEpgListings(

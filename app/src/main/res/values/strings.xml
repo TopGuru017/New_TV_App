@@ -48,6 +48,11 @@
     <string name="search_hint_run">Select Search on the keyboard or press Enter.</string>
     <string name="search_badge_movie">Movie</string>
     <string name="search_badge_series">Series</string>
+    <string name="search_badge_live">Live TV</string>
+    <string name="search_recordings_found">Recording found: %1$d item(s)</string>
+    <string name="search_section_vod_series">VOD - Series</string>
+    <string name="search_section_vod_movies">VOD - Movies</string>
+    <string name="search_result_id_fmt">Result: %1$s</string>
     <string name="search_cd_globe">Switch letter case</string>
     <string name="search_cd_backspace">Backspace</string>
 
