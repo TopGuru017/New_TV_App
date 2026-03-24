@@ -190,10 +190,7 @@ class VodBrowseFragment : Fragment() {
                 val id = selectedCategoryId
                 catalogAdapter.findName(id) ?: "—"
             },
-            focusCategoryAt = { index ->
-                categoriesRv.scrollToPosition(index)
-                requestFocusVodCategoryAfterScroll(categoriesRv, index)
-            },
+            focusGridCellAt = { pos -> requestFocusGridCellVod(itemsRv, pos) },
             movies = movies,
             shows = shows,
             onMovieFocused = { m, cat -> showMovieDetail(m, cat) },
@@ -552,6 +549,18 @@ private fun requestFocusVodCategoryAfterScroll(rv: RecyclerView, adapterPosition
     }
 }
 
+private fun requestFocusGridCellVod(rv: RecyclerView, adapterPosition: Int, attemptsRemaining: Int = 24) {
+    rv.scrollToPosition(adapterPosition)
+    rv.post {
+        val h = rv.findViewHolderForAdapterPosition(adapterPosition)
+        if (h != null) {
+            h.itemView.requestFocus()
+        } else if (attemptsRemaining > 0) {
+            rv.postDelayed({ requestFocusGridCellVod(rv, adapterPosition, attemptsRemaining - 1) }, 32L)
+        }
+    }
+}
+
 private class VodGridAdapter(
     private val mode: String,
     private val spanCount: Int,
@@ -559,7 +568,7 @@ private class VodGridAdapter(
     private val categoriesRecyclerView: RecyclerView,
     private val selectedCategoryIndex: () -> Int,
     private val categoryNameProvider: () -> String,
-    private val focusCategoryAt: (Int) -> Unit,
+    private val focusGridCellAt: (Int) -> Unit,
     private val movies: MutableList<VodMovieItem>,
     private val shows: MutableList<SeriesShow>,
     private val onMovieFocused: (VodMovieItem, String) -> Unit,
@@ -580,6 +589,9 @@ private class VodGridAdapter(
     override fun onBindViewHolder(holder: VH, position: Int) {
         val col = position % spanCount
         val catIdx = selectedCategoryIndex()
+        val itemCount = itemCount
+        val rowStart = (position / spanCount) * spanCount
+        val rowEnd = kotlin.math.min(rowStart + spanCount - 1, itemCount - 1)
         holder.itemView.nextFocusLeftId =
             if (col == 0 && catIdx <= 0) sidebarFocusAnchorId else View.NO_ID
         holder.itemView.nextFocusUpId = View.NO_ID
@@ -591,20 +603,27 @@ private class VodGridAdapter(
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 val idx = selectedCategoryIndex()
-                val n = categoriesRecyclerView.adapter?.itemCount ?: 0
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        if (col == 0 && idx > 0) {
-                            focusCategoryAt(idx - 1)
-                            true
+                        if (position == rowStart) {
+                            if (position > 0) {
+                                focusGridCellAt(position - 1)
+                                true
+                            } else {
+                                true
+                            }
                         } else {
                             false
                         }
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        if (col == spanCount - 1 && idx < n - 1) {
-                            focusCategoryAt(idx + 1)
-                            true
+                        if (position == rowEnd) {
+                            if (position < itemCount - 1) {
+                                focusGridCellAt(position + 1)
+                                true
+                            } else {
+                                true
+                            }
                         } else {
                             false
                         }
@@ -641,20 +660,27 @@ private class VodGridAdapter(
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 val idx = selectedCategoryIndex()
-                val n = categoriesRecyclerView.adapter?.itemCount ?: 0
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        if (col == 0 && idx > 0) {
-                            focusCategoryAt(idx - 1)
-                            true
+                        if (position == rowStart) {
+                            if (position > 0) {
+                                focusGridCellAt(position - 1)
+                                true
+                            } else {
+                                true
+                            }
                         } else {
                             false
                         }
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        if (col == spanCount - 1 && idx < n - 1) {
-                            focusCategoryAt(idx + 1)
-                            true
+                        if (position == rowEnd) {
+                            if (position < itemCount - 1) {
+                                focusGridCellAt(position + 1)
+                                true
+                            } else {
+                                true
+                            }
                         } else {
                             false
                         }

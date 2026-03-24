@@ -3,23 +3,30 @@ package com.example.new_tv_app
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.IntentCompat
+import androidx.core.view.isVisible
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.bumptech.glide.Glide
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
+import java.util.Locale
 
 /**
- * Plays VOD and live IPTV via LibVLC (handles redirects / HLS / odd servers better than MediaPlayer / ExoPlayer defaults).
- *
- * Many Xtream-style panels respond with **302** to a CDN/origin that checks **Referer** and/or rejects the default **VLC/x.x**
- * user-agent; the redirected request then returns **403** unless we send a panel **Referer** and a browser-like **User-Agent**.
+ * Plays VOD and live IPTV via LibVLC. Bottom overlay: preview-style strip + progress for seekable content;
+ * live / non-seekable shows timeline row only (no strip).
  */
 class PlaybackVideoFragment : Fragment() {
 
@@ -27,6 +34,28 @@ class PlaybackVideoFragment : Fragment() {
     private var mediaPlayer: MediaPlayer? = null
     private var currentPlaybackUrl: String = ""
     private var didCrossProtocolRetry = false
+
+    private lateinit var videoLayout: VLCVideoLayout
+    private lateinit var controlsOverlay: View
+    private lateinit var trickRv: RecyclerView
+    private lateinit var timeCurrent: TextView
+    private lateinit var timeTotal: TextView
+    private lateinit var progressBar: ProgressBar
+
+    private val trickSlots = mutableListOf<TrickSlot>()
+    private lateinit var trickAdapter: TrickStripAdapter
+    private var posterUrl: String? = null
+    /** Last duration used to build trick strip; rebuild when LibVLC reports a new length. */
+    private var trickStripBuiltForLengthMs: Long = -1L
+
+    private val progressTicker = object : Runnable {
+        override fun run() {
+            val v = view ?: return
+            if (!isAdded) return
+            updatePlaybackControlsUi()
+            v.postDelayed(this, 500L)
+        }
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -57,11 +86,31 @@ class PlaybackVideoFragment : Fragment() {
             return
         }
 
+        posterUrl = sequenceOf(movie.cardImageUrl, movie.backgroundImageUrl)
+            .firstOrNull { !it.isNullOrBlank() }
+
         currentPlaybackUrl = url
         didCrossProtocolRetry = false
         logPlaybackTarget(url, movie.title)
 
-        val videoLayout = view.findViewById<VLCVideoLayout>(R.id.vlc_video_layout)
+        videoLayout = view.findViewById(R.id.vlc_video_layout)
+        controlsOverlay = view.findViewById(R.id.playback_controls_overlay)
+        trickRv = view.findViewById(R.id.playback_trick_rv)
+        timeCurrent = view.findViewById(R.id.playback_time_current)
+        timeTotal = view.findViewById(R.id.playback_time_total)
+        progressBar = view.findViewById(R.id.playback_progress)
+
+        trickAdapter = TrickStripAdapter(
+            posterUrl = posterUrl,
+            slots = trickSlots,
+            onSeek = { ms -> seekToMs(ms) },
+            onRequestFocusVideo = { videoLayout.requestFocus() },
+        )
+        trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        trickRv.setHasFixedSize(true)
+        trickRv.itemAnimator = null
+        trickRv.adapter = trickAdapter
+
         videoLayout.doOnLayout { vl ->
             Log.d(
                 TAG,
@@ -70,10 +119,33 @@ class PlaybackVideoFragment : Fragment() {
             )
         }
 
+        videoLayout.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    mediaPlayer?.let { p ->
+                        if (p.isPlaying) p.pause() else p.play()
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (trickRv.isVisible && trickAdapter.itemCount > 0) {
+                        focusTrickNearCurrentTime()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                else -> false
+            }
+        }
+
         val options = ArrayList<String>().apply {
             add("--network-caching=2500")
             add("--http-reconnect")
-            // Extra VLC engine lines in Logcat (tag often "VLC" / "vlc"); remove if too noisy.
             add("-vv")
         }
         Log.d(TAG, "LibVLC options=$options")
@@ -97,6 +169,17 @@ class PlaybackVideoFragment : Fragment() {
                         ).show()
                     }
                 }
+                return@setEventListener
+            }
+            when (event.type) {
+                MediaPlayer.Event.LengthChanged,
+                MediaPlayer.Event.SeekableChanged,
+                -> view.post { rebuildTrickStripIfNeeded() }
+                MediaPlayer.Event.Playing -> view.post {
+                    rebuildTrickStripIfNeeded()
+                    startProgressTicker()
+                }
+                else -> {}
             }
         }
 
@@ -104,16 +187,25 @@ class PlaybackVideoFragment : Fragment() {
         player.attachViews(videoLayout, null, false, false)
 
         startPlayback(player, url)
+
+        videoLayout.post { if (isAdded) videoLayout.requestFocus() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (mediaPlayer?.isPlaying == true) startProgressTicker()
     }
 
     override fun onStop() {
         Log.d(TAG, "onStop → pause()")
+        view?.removeCallbacks(progressTicker)
         mediaPlayer?.pause()
         super.onStop()
     }
 
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/detach/release")
+        view?.removeCallbacks(progressTicker)
         mediaPlayer?.let { p ->
             p.stop()
             p.detachViews()
@@ -125,12 +217,137 @@ class PlaybackVideoFragment : Fragment() {
         super.onDestroyView()
     }
 
+    private fun startProgressTicker() {
+        val v = view ?: return
+        v.removeCallbacks(progressTicker)
+        v.post(progressTicker)
+    }
+
+    private fun seekToMs(ms: Long) {
+        val p = mediaPlayer ?: return
+        runCatching {
+            p.setTime(ms)
+            if (!p.isPlaying) p.play()
+        }.onFailure { Log.w(TAG, "seek failed", it) }
+    }
+
+    private fun focusTrickNearCurrentTime() {
+        val p = mediaPlayer ?: return
+        val len = mediaLengthMs(p)
+        if (len <= 0L || trickSlots.isEmpty()) return
+        val t = p.time.coerceIn(0L, len)
+        val n = trickSlots.size
+        val idx = ((t * n) / len).toInt().coerceIn(0, n - 1)
+        trickRv.scrollToPosition(idx)
+        trickRv.post {
+            trickRv.findViewHolderForAdapterPosition(idx)?.itemView?.requestFocus()
+        }
+    }
+
+    private fun rebuildTrickStripIfNeeded() {
+        val p = mediaPlayer ?: return
+        val len = mediaLengthMs(p)
+        val seekable = p.isSeekable && len > 1_000L
+
+        controlsOverlay.isVisible = true
+
+        if (seekable) {
+            trickRv.isVisible = true
+            if (len != trickStripBuiltForLengthMs) {
+                trickStripBuiltForLengthMs = len
+                trickSlots.clear()
+                val step = (len / TRICK_SLOT_COUNT).coerceAtLeast(1L)
+                for (i in 0 until TRICK_SLOT_COUNT) {
+                    val start = (i * step).coerceAtMost((len - 1L).coerceAtLeast(0L))
+                    trickSlots.add(TrickSlot(start, formatPlaybackTimeMs(start)))
+                }
+                trickAdapter.notifyDataSetChanged()
+            }
+            timeTotal.text = formatPlaybackTimeMs(len)
+        } else {
+            trickStripBuiltForLengthMs = -1L
+            trickRv.isVisible = false
+            trickSlots.clear()
+            trickAdapter.notifyDataSetChanged()
+            timeTotal.text = getString(R.string.playback_live)
+        }
+        updatePlaybackControlsUi()
+    }
+
+    private fun updatePlaybackControlsUi() {
+        val p = mediaPlayer ?: return
+        val len = mediaLengthMs(p)
+        val cur = p.time.coerceAtLeast(0L)
+        timeCurrent.text = formatPlaybackTimeMs(cur)
+
+        val showProgress = len > 0L && p.isSeekable
+        progressBar.isVisible = showProgress
+        if (showProgress) {
+            val ratio = (cur * 1000L / len).toInt().coerceIn(0, 1000)
+            progressBar.progress = ratio
+        } else {
+            progressBar.progress = 0
+        }
+    }
+
+    private fun mediaLengthMs(p: MediaPlayer): Long {
+        val l = p.length
+        return if (l > 0L) l else 0L
+    }
+
+    private fun startPlayback(player: MediaPlayer, url: String) {
+        currentPlaybackUrl = url
+        val media = Media(libVLC ?: return, Uri.parse(url))
+        applyPanelFriendlyHttpOptions(media, url)
+        Log.d(TAG, "Media created, binding to player; url=${sanitizeUrlForLog(url)}")
+        player.media = media
+        media.release()
+        Log.d(TAG, "play() called")
+        player.play()
+    }
+
+    private fun retryWithAlternateSchemeIfNeeded(): Boolean {
+        if (didCrossProtocolRetry) return false
+        val alt = alternateScheme(currentPlaybackUrl) ?: return false
+        val player = mediaPlayer ?: return false
+        didCrossProtocolRetry = true
+        Log.w(
+            TAG,
+            "Retrying playback with alternate scheme: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(alt)}",
+        )
+        startPlayback(player, alt)
+        return true
+    }
+
+    private fun alternateScheme(url: String): String? = when {
+        url.startsWith("https://", ignoreCase = true) ->
+            "http://${url.removePrefix("https://")}"
+        url.startsWith("http://", ignoreCase = true) ->
+            "https://${url.removePrefix("http://")}"
+        else -> null
+    }
+
+    private fun sanitizeUrlForLog(url: String): String {
+        val u = Uri.parse(url)
+        return "${u.scheme}://${u.host}${u.path.orEmpty()}"
+    }
+
     private companion object {
         const val TAG = "PlaybackVLC"
+        const val TRICK_SLOT_COUNT = 18
 
-        /**
-         * Panel **Referer** (scheme + host) and a TV **Chrome** user-agent for HTTP(S), including after redirects.
-         */
+        fun formatPlaybackTimeMs(ms: Long): String {
+            val totalSec = (ms / 1000L).coerceAtLeast(0L)
+            val h = totalSec / 3600L
+            val m = (totalSec % 3600L) / 60L
+            val s = totalSec % 60L
+            return if (h > 0L) {
+                String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+            } else {
+                String.format(Locale.US, "%d:%02d", m, s)
+            }
+        }
+
         fun applyPanelFriendlyHttpOptions(media: Media, streamUrl: String) {
             val u = Uri.parse(streamUrl)
             val scheme = u.scheme?.lowercase() ?: return
@@ -143,7 +360,6 @@ class PlaybackVideoFragment : Fragment() {
             )
         }
 
-        /** Logs host + stream id only (path contains credentials for Xtream-style URLs). */
         fun logPlaybackTarget(url: String, title: String?) {
             val u = Uri.parse(url)
             val last = u.lastPathSegment ?: "?"
@@ -187,41 +403,67 @@ class PlaybackVideoFragment : Fragment() {
             else -> "Unknown($type)"
         }
     }
+}
 
-    private fun startPlayback(player: MediaPlayer, url: String) {
-        currentPlaybackUrl = url
-        val media = Media(libVLC ?: return, Uri.parse(url))
-        applyPanelFriendlyHttpOptions(media, url)
-        Log.d(TAG, "Media created, binding to player; url=${sanitizeUrlForLog(url)}")
-        player.media = media
-        media.release()
-        Log.d(TAG, "play() called")
-        player.play()
+private data class TrickSlot(val startMs: Long, val label: String)
+
+private class TrickStripAdapter(
+    private val posterUrl: String?,
+    private val slots: List<TrickSlot>,
+    private val onSeek: (Long) -> Unit,
+    private val onRequestFocusVideo: () -> Unit,
+) : RecyclerView.Adapter<TrickStripAdapter.VH>() {
+
+    override fun getItemCount(): Int = slots.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_playback_trick_card, parent, false)
+        return VH(v)
     }
 
-    private fun retryWithAlternateSchemeIfNeeded(): Boolean {
-        if (didCrossProtocolRetry) return false
-        val alt = alternateScheme(currentPlaybackUrl) ?: return false
-        val player = mediaPlayer ?: return false
-        didCrossProtocolRetry = true
-        Log.w(
-            TAG,
-            "Retrying playback with alternate scheme: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(alt)}",
-        )
-        startPlayback(player, alt)
-        return true
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val slot = slots[position]
+        holder.time.text = slot.label
+        holder.itemView.contentDescription =
+            holder.itemView.context.getString(R.string.playback_cd_trick_seek, slot.label)
+
+        val url = posterUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (url.isNullOrEmpty()) {
+            Glide.with(holder.poster).clear(holder.poster)
+            holder.poster.setImageDrawable(null)
+        } else {
+            Glide.with(holder.poster).load(url).centerCrop().into(holder.poster)
+        }
+
+        holder.itemView.nextFocusLeftId =
+            if (position == 0) R.id.vlc_video_layout else View.NO_ID
+
+        holder.itemView.setOnClickListener {
+            holder.itemView.requestFocus()
+            onSeek(slot.startMs)
+        }
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    onSeek(slot.startMs)
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    onRequestFocusVideo()
+                    true
+                }
+                else -> false
+            }
+        }
     }
 
-    private fun alternateScheme(url: String): String? = when {
-        url.startsWith("https://", ignoreCase = true) ->
-            "http://${url.removePrefix("https://")}"
-        url.startsWith("http://", ignoreCase = true) ->
-            "https://${url.removePrefix("http://")}"
-        else -> null
-    }
-
-    private fun sanitizeUrlForLog(url: String): String {
-        val u = Uri.parse(url)
-        return "${u.scheme}://${u.host}${u.path.orEmpty()}"
+    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val poster: ImageView = itemView.findViewById(R.id.playback_trick_poster)
+        val time: TextView = itemView.findViewById(R.id.playback_trick_time)
     }
 }
