@@ -18,6 +18,9 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.example.new_tv_app.iptv.EpgListing
+import com.example.new_tv_app.iptv.IptvStreamUrls
+import com.example.new_tv_app.iptv.IptvTimeUtils
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -25,9 +28,11 @@ import org.videolan.libvlc.util.VLCVideoLayout
 import java.util.Locale
 
 /**
- * Plays VOD and live IPTV via LibVLC. Bottom overlay: preview-style strip + progress for seekable content;
- * live / non-seekable shows timeline row only (no strip).
- * Seekable VOD: DPAD left/right on the video opens chapter cards; Enter closes the strip (or play/pause when hidden).
+ * Plays VOD and live IPTV via LibVLC. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
+ * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown.
+ * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down toggles a vertical
+ * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
+ * still applies when the stream is seekable.
  */
 class PlaybackVideoFragment : Fragment() {
 
@@ -42,6 +47,8 @@ class PlaybackVideoFragment : Fragment() {
     private lateinit var timeCurrent: TextView
     private lateinit var timeTotal: TextView
     private lateinit var progressBar: ProgressBar
+    private lateinit var recordsColumnContainer: View
+    private lateinit var recordsColumnRv: RecyclerView
 
     private val trickSlots = mutableListOf<TrickSlot>()
     private lateinit var trickAdapter: TrickStripAdapter
@@ -50,6 +57,13 @@ class PlaybackVideoFragment : Fragment() {
     private var trickStripBuiltForLengthMs: Long = -1L
     /** Seek chapter cards visible (DPAD left/right on video); playback paused while visible. */
     private var trickStripUserVisible: Boolean = false
+
+    private var recordsArchiveStreamId: String? = null
+    private val recordsDayListings = mutableListOf<EpgListing>()
+    /** Vertical day list visible (DPAD up/down on video); only when [recordsDayListings] non-empty. */
+    private var recordsColumnUserVisible: Boolean = false
+    private var currentArchiveListingId: Long = 0L
+    private lateinit var recordsColumnAdapter: RecordsColumnPlaybackAdapter
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -92,6 +106,20 @@ class PlaybackVideoFragment : Fragment() {
         posterUrl = sequenceOf(movie.cardImageUrl, movie.backgroundImageUrl)
             .firstOrNull { !it.isNullOrBlank() }
 
+        currentArchiveListingId = movie.id
+        recordsArchiveStreamId =
+            requireActivity().intent.getStringExtra(PlaybackActivity.RECORDS_ARCHIVE_STREAM_ID)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        recordsDayListings.clear()
+        @Suppress("DEPRECATION")
+        val rawList = requireActivity().intent.getSerializableExtra(PlaybackActivity.RECORDS_DAY_LISTINGS)
+        if (rawList is ArrayList<*>) {
+            for (e in rawList) {
+                if (e is EpgListing) recordsDayListings.add(e)
+            }
+        }
+
         currentPlaybackUrl = url
         didCrossProtocolRetry = false
         logPlaybackTarget(url, movie.title)
@@ -102,13 +130,25 @@ class PlaybackVideoFragment : Fragment() {
         timeCurrent = view.findViewById(R.id.playback_time_current)
         timeTotal = view.findViewById(R.id.playback_time_total)
         progressBar = view.findViewById(R.id.playback_progress)
+        recordsColumnContainer = view.findViewById(R.id.playback_records_column_container)
+        recordsColumnRv = view.findViewById(R.id.playback_records_column_rv)
 
         trickAdapter = TrickStripAdapter(
-            posterUrl = posterUrl,
+            initialPosterUrl = posterUrl,
             slots = trickSlots,
             onActivateCard = { ms -> activateTrickCardAndResume(ms) },
             onRequestFocusVideo = { videoLayout.requestFocus() },
         )
+        recordsColumnAdapter = RecordsColumnPlaybackAdapter(
+            listings = recordsDayListings,
+            onActivate = { listing -> activateRecordsListing(listing) },
+            onCloseColumn = { closeRecordsColumnAndResume() },
+            videoFocusId = R.id.vlc_video_layout,
+        )
+        recordsColumnRv.layoutManager = LinearLayoutManager(requireContext())
+        recordsColumnRv.adapter = recordsColumnAdapter
+        recordsColumnRv.itemAnimator = null
+        recordsColumnContainer.isVisible = false
         trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
         trickRv.setHasFixedSize(true)
         trickRv.itemAnimator = null
@@ -125,6 +165,21 @@ class PlaybackVideoFragment : Fragment() {
         videoLayout.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP,
+                KeyEvent.KEYCODE_DPAD_DOWN,
+                -> {
+                    if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty()) {
+                        toggleRecordsColumn()
+                        return@setOnKeyListener true
+                    }
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (trickRv.isVisible && trickAdapter.itemCount > 0) {
+                            focusTrickNearCurrentTime()
+                            return@setOnKeyListener true
+                        }
+                    }
+                    false
+                }
                 KeyEvent.KEYCODE_DPAD_LEFT,
                 KeyEvent.KEYCODE_DPAD_RIGHT,
                 -> {
@@ -140,6 +195,8 @@ class PlaybackVideoFragment : Fragment() {
                             false
                         }
                     } else {
+                        recordsColumnUserVisible = false
+                        recordsColumnContainer.isVisible = false
                         trickStripUserVisible = true
                         trickRv.isVisible = true
                         if (p.isPlaying) p.pause()
@@ -153,7 +210,9 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
                     val p = mediaPlayer ?: return@setOnKeyListener false
-                    if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
+                    if (recordsColumnUserVisible) {
+                        closeRecordsColumnAndResume()
+                    } else if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
                         trickStripUserVisible = false
                         trickRv.isVisible = false
                         if (!p.isPlaying) p.play()
@@ -162,14 +221,6 @@ class PlaybackVideoFragment : Fragment() {
                         if (p.isPlaying) p.pause() else p.play()
                     }
                     true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (trickRv.isVisible && trickAdapter.itemCount > 0) {
-                        focusTrickNearCurrentTime()
-                        true
-                    } else {
-                        false
-                    }
                 }
                 else -> false
             }
@@ -261,6 +312,8 @@ class PlaybackVideoFragment : Fragment() {
         runCatching { p.setTime(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
         trickStripUserVisible = false
         trickRv.isVisible = false
+        recordsColumnUserVisible = false
+        recordsColumnContainer.isVisible = false
         if (!p.isPlaying) p.play()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
@@ -279,12 +332,74 @@ class PlaybackVideoFragment : Fragment() {
         }
     }
 
+    private fun toggleRecordsColumn() {
+        if (recordsDayListings.isEmpty() || recordsArchiveStreamId.isNullOrEmpty()) return
+        if (recordsColumnUserVisible) closeRecordsColumnAndResume() else openRecordsColumn()
+    }
+
+    private fun openRecordsColumn() {
+        if (recordsDayListings.isEmpty() || recordsArchiveStreamId.isNullOrEmpty()) return
+        trickStripUserVisible = false
+        trickRv.isVisible = false
+        recordsColumnUserVisible = true
+        recordsColumnContainer.isVisible = true
+        recordsColumnAdapter.notifyDataSetChanged()
+        mediaPlayer?.pause()
+        val idx = recordsDayListings.indexOfFirst { (it.startUnix xor it.endUnix) == currentArchiveListingId }
+            .let { if (it >= 0) it else 0 }
+        recordsColumnRv.scrollToPosition(idx)
+        requestFocusOnRecordsColumnPosition(idx)
+        updatePlaybackControlsUi()
+    }
+
+    private fun requestFocusOnRecordsColumnPosition(adapterPosition: Int) {
+        recordsColumnRv.post {
+            val h = recordsColumnRv.findViewHolderForAdapterPosition(adapterPosition)
+            if (h != null) {
+                h.itemView.requestFocus()
+            } else {
+                recordsColumnRv.postDelayed(
+                    {
+                        recordsColumnRv.findViewHolderForAdapterPosition(adapterPosition)?.itemView?.requestFocus()
+                    },
+                    64L,
+                )
+            }
+        }
+    }
+
+    private fun closeRecordsColumnAndResume() {
+        if (!recordsColumnUserVisible) return
+        recordsColumnUserVisible = false
+        recordsColumnContainer.isVisible = false
+        val p = mediaPlayer ?: return
+        if (!p.isPlaying) p.play()
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
+    }
+
+    private fun activateRecordsListing(listing: EpgListing) {
+        val sid = recordsArchiveStreamId ?: return
+        val player = mediaPlayer ?: return
+        val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
+        currentArchiveListingId = listing.startUnix xor listing.endUnix
+        posterUrl = sequenceOf(listing.imageUrl, posterUrl).firstOrNull { !it.isNullOrBlank() }
+        trickAdapter.setPosterUrl(posterUrl)
+        trickStripBuiltForLengthMs = -1L
+        trickStripUserVisible = false
+        trickRv.isVisible = false
+        recordsColumnUserVisible = false
+        recordsColumnContainer.isVisible = false
+        runCatching { player.stop() }
+        startPlayback(player, url)
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
+    }
+
     private fun rebuildTrickStripIfNeeded() {
         val p = mediaPlayer ?: return
         val len = mediaLengthMs(p)
         val seekable = p.isSeekable && len > 1_000L
-
-        controlsOverlay.isVisible = true
 
         if (seekable) {
             if (len != trickStripBuiltForLengthMs) {
@@ -314,13 +429,21 @@ class PlaybackVideoFragment : Fragment() {
         val p = mediaPlayer ?: return
         val len = mediaLengthMs(p)
         val cur = p.time.coerceAtLeast(0L)
-        timeCurrent.text = formatPlaybackTimeMs(cur)
+        val stripShowing = trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()
+        val seekableVod = p.isSeekable && len > 1_000L
+        val showChrome = stripShowing && seekableVod
 
-        // Timeline + bar while playing, and while chapter cards are open (same seekable VOD).
-        val seekable = p.isSeekable && (len > 1_000L || trickStripUserVisible)
-        val showProgress = seekable && (len > 0L || trickStripUserVisible)
-        progressBar.isVisible = showProgress
-        if (showProgress && len > 0L) {
+        controlsOverlay.isVisible = showChrome
+        if (!showChrome) {
+            progressBar.isVisible = false
+            progressBar.progress = 0
+            return
+        }
+
+        timeCurrent.text = formatPlaybackTimeMs(cur)
+        timeTotal.text = formatPlaybackTimeMs(len)
+        progressBar.isVisible = len > 0L
+        if (len > 0L) {
             val ratio = (cur * 1000L / len).toInt().coerceIn(0, 1000)
             progressBar.progress = ratio
         } else {
@@ -445,12 +568,104 @@ class PlaybackVideoFragment : Fragment() {
 
 private data class TrickSlot(val startMs: Long, val label: String)
 
+private class RecordsColumnPlaybackAdapter(
+    private val listings: List<EpgListing>,
+    private val onActivate: (EpgListing) -> Unit,
+    private val onCloseColumn: () -> Unit,
+    private val videoFocusId: Int,
+) : RecyclerView.Adapter<RecordsColumnPlaybackAdapter.VH>() {
+
+    override fun getItemCount(): Int = listings.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_playback_records_column, parent, false)
+        return VH(v)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val listing = listings[position]
+        val timeLabel = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+        holder.time.text = timeLabel
+        holder.title.text = listing.title
+        holder.itemView.contentDescription =
+            holder.itemView.context.getString(R.string.playback_cd_trick_seek, timeLabel)
+
+        val img = listing.imageUrl
+        if (img.isNullOrBlank()) {
+            Glide.with(holder.thumb).clear(holder.thumb)
+            holder.thumb.setImageDrawable(null)
+        } else {
+            Glide.with(holder.thumb).load(img).centerCrop().into(holder.thumb)
+        }
+
+        holder.itemView.nextFocusLeftId = videoFocusId
+
+        holder.itemView.setOnClickListener { onActivate(listing) }
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            val pos = holder.bindingAdapterPosition
+            if (pos == RecyclerView.NO_POSITION) return@setOnKeyListener false
+            val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
+            val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP ->
+                    if (pos == 0) {
+                        onCloseColumn()
+                        true
+                    } else {
+                        false
+                    }
+                KeyEvent.KEYCODE_BACK -> {
+                    onCloseColumn()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (pos >= itemCount - 1) return@setOnKeyListener false
+                    if (lm.findViewByPosition(pos + 1) != null) return@setOnKeyListener false
+                    val next = pos + 1
+                    rv.scrollToPosition(next)
+                    rv.post {
+                        rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus()
+                            ?: rv.postDelayed(
+                                { rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus() },
+                                64L,
+                            )
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    onActivate(listing)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val thumb: ImageView = itemView.findViewById(R.id.playback_records_col_thumb)
+        val time: TextView = itemView.findViewById(R.id.playback_records_col_time)
+        val title: TextView = itemView.findViewById(R.id.playback_records_col_title)
+    }
+}
+
 private class TrickStripAdapter(
-    private val posterUrl: String?,
+    initialPosterUrl: String?,
     private val slots: List<TrickSlot>,
     private val onActivateCard: (Long) -> Unit,
     private val onRequestFocusVideo: () -> Unit,
 ) : RecyclerView.Adapter<TrickStripAdapter.VH>() {
+
+    private var posterUrl: String? = initialPosterUrl
+
+    fun setPosterUrl(url: String?) {
+        posterUrl = url
+        notifyDataSetChanged()
+    }
 
     override fun getItemCount(): Int = slots.size
 

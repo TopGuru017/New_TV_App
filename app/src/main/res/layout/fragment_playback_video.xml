@@ -78,4 +78,27 @@
                 tools:text="3:13:00" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- Records catch-up only: vertical list for the selected day (DPAD up/down on video). -->
+    <FrameLayout
+        android:id="@+id/playback_records_column_container"
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="#CC05070A"
+        android:focusable="false"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/playback_records_column_rv"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:paddingStart="10dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="16dp" />
+    </FrameLayout>
 </FrameLayout>

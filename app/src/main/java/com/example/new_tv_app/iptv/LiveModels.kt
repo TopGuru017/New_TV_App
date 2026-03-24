@@ -1,5 +1,7 @@
 package com.example.new_tv_app.iptv
 
+import java.io.Serializable
+
 data class LiveCategory(
     val id: String,
     val name: String,
@@ -22,4 +24,8 @@ data class EpgListing(
     val startUnix: Long,
     val endUnix: Long,
     val imageUrl: String? = null,
-)
+) : Serializable {
+    companion object {
+        private const val serialVersionUID = 1L
+    }
+}

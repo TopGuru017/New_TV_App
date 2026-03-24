@@ -44,9 +44,7 @@ private fun requestFocusRecyclerChildAfterScroll(rv: RecyclerView, adapterPositi
     }
 }
 
-/**
- * Catch-up UI: channel bar, last 7 Israel calendar days, programme list with timeshift playback.
- */
+/** Catch-up UI: channel bar, last 7 Israel calendar days, vertical programme list with timeshift playback. */
 class RecordsDetailFragment : Fragment() {
 
     private var barStreams: List<LiveStream> = emptyList()
@@ -105,6 +103,7 @@ class RecordsDetailFragment : Fragment() {
         val error = view.findViewById<TextView>(R.id.records_detail_error)
 
         var lastProgramFocusIndex = 0
+        var currentDayListings: List<EpgListing> = emptyList()
 
         fun focusRecyclerPosition(rv: RecyclerView, position: Int, attemptsRemaining: Int = 28) {
             if (position < 0 || rv.adapter == null || position >= rv.adapter!!.itemCount) return
@@ -168,6 +167,7 @@ class RecordsDetailFragment : Fragment() {
 
         fun refreshProgramList() {
             if (selectedDayIndex !in daySlots.indices) {
+                currentDayListings = emptyList()
                 programsAdapter.submit(emptyList())
                 programsEmpty.isVisible = true
                 return
@@ -181,8 +181,45 @@ class RecordsDetailFragment : Fragment() {
             } else {
                 list.sortedBy { it.startUnix }
             }
+            currentDayListings = list
             programsAdapter.submit(list)
             programsEmpty.isVisible = list.isEmpty()
+        }
+
+        fun playArchiveListing(listing: EpgListing) {
+            val sid = selectedStreamId
+            if (sid.isEmpty()) return
+            val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
+            val channelName =
+                barStreams.find { it.streamId == sid }?.name
+            val timeRange = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+            val tag = listing.category
+            val imageUrl = listing.imageUrl ?: barStreams.find { it.streamId == sid }?.iconUrl
+            val movie = Movie(
+                id = listing.startUnix xor listing.endUnix,
+                title = listing.title,
+                description = timeRange,
+                backgroundImageUrl = imageUrl,
+                cardImageUrl = imageUrl,
+                videoUrl = url,
+                studio = listing.category,
+            )
+            LastWatchStore.addRecords(
+                context = requireContext(),
+                playedUnixSeconds = IptvTimeUtils.nowIsraelSeconds(),
+                channelName = channelName,
+                tag = tag,
+                timeRange = timeRange,
+                imageUrl = imageUrl,
+                movie = movie,
+            )
+            startActivity(
+                Intent(requireContext(), PlaybackActivity::class.java).apply {
+                    putExtra(DetailsActivity.MOVIE, movie)
+                    putExtra(PlaybackActivity.RECORDS_ARCHIVE_STREAM_ID, sid)
+                    putExtra(PlaybackActivity.RECORDS_DAY_LISTINGS, ArrayList(currentDayListings))
+                },
+            )
         }
 
         fun loadEpg(streamId: String) {
@@ -249,40 +286,7 @@ class RecordsDetailFragment : Fragment() {
                 focusSelectedChannelInBar()
                 true
             },
-            onProgramPlay = { listing ->
-                val sid = selectedStreamId
-                if (sid.isNotEmpty()) {
-                    val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
-                    val channelName =
-                        barStreams.find { it.streamId == sid }?.name
-                    val timeRange = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
-                    val tag = listing.category
-                    val imageUrl = listing.imageUrl ?: barStreams.find { it.streamId == sid }?.iconUrl
-                    val movie = Movie(
-                        id = listing.startUnix xor listing.endUnix,
-                        title = listing.title,
-                        description = timeRange,
-                        backgroundImageUrl = imageUrl,
-                        cardImageUrl = imageUrl,
-                        videoUrl = url,
-                        studio = listing.category,
-                    )
-                    LastWatchStore.addRecords(
-                        context = requireContext(),
-                        playedUnixSeconds = IptvTimeUtils.nowIsraelSeconds(),
-                        channelName = channelName,
-                        tag = tag,
-                        timeRange = timeRange,
-                        imageUrl = imageUrl,
-                        movie = movie,
-                    )
-                    startActivity(
-                        Intent(requireContext(), PlaybackActivity::class.java).apply {
-                            putExtra(DetailsActivity.MOVIE, movie)
-                        },
-                    )
-                }
-            },
+            onProgramPlay = { listing -> playArchiveListing(listing) },
         )
 
         datesAdapter = RecordsDatesAdapter(

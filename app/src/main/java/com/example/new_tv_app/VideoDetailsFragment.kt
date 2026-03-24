@@ -3,6 +3,7 @@ package com.example.new_tv_app
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Build
 import android.os.Bundle
 import android.graphics.drawable.Drawable
 import androidx.leanback.app.DetailsSupportFragment
@@ -28,7 +29,7 @@ import android.util.Log
 import android.widget.Toast
 
 import com.bumptech.glide.Glide
-import com.bumptech.glide.request.target.SimpleTarget
+import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 
 import java.util.Collections
@@ -51,7 +52,13 @@ class VideoDetailsFragment : DetailsSupportFragment() {
 
         mDetailsBackground = DetailsSupportFragmentBackgroundController(this)
 
-        mSelectedMovie = activity!!.intent.getSerializableExtra(DetailsActivity.MOVIE) as Movie
+        val intent = requireActivity().intent
+        mSelectedMovie = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getSerializableExtra(DetailsActivity.MOVIE, Movie::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getSerializableExtra(DetailsActivity.MOVIE) as? Movie
+        }
         if (mSelectedMovie != null) {
             mPresenterSelector = ClassPresenterSelector()
             mAdapter = ArrayObjectAdapter(mPresenterSelector)
@@ -74,13 +81,17 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             .centerCrop()
             .error(R.drawable.default_background)
             .load(movie?.backgroundImageUrl)
-            .into<SimpleTarget<Bitmap>>(object : SimpleTarget<Bitmap>() {
+            .into(object : CustomTarget<Bitmap>() {
                 override fun onResourceReady(
                     bitmap: Bitmap,
-                    transition: Transition<in Bitmap>?
+                    transition: Transition<in Bitmap>?,
                 ) {
                     mDetailsBackground.coverBitmap = bitmap
                     mAdapter.notifyArrayItemRangeChanged(0, mAdapter.size())
+                }
+
+                override fun onLoadCleared(placeholder: Drawable?) {
+                    mDetailsBackground.coverBitmap = null
                 }
             })
     }
@@ -96,14 +107,19 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             .load(movie.cardImageUrl)
             .centerCrop()
             .error(R.drawable.default_background)
-            .into<SimpleTarget<Drawable>>(object : SimpleTarget<Drawable>(width, height) {
+            .into(object : CustomTarget<Drawable>(width, height) {
                 override fun onResourceReady(
                     drawable: Drawable,
-                    transition: Transition<in Drawable>?
+                    transition: Transition<in Drawable>?,
                 ) {
                     Log.d(TAG, "details overview card image url ready: " + drawable)
                     row.imageDrawable = drawable
                     mAdapter.notifyArrayItemRangeChanged(0, mAdapter.size())
+                }
+
+                override fun onLoadCleared(placeholder: Drawable?) {
+                    row.imageDrawable = placeholder
+                        ?: ContextCompat.getDrawable(activity!!, R.drawable.default_background)
                 }
             })
 
