@@ -5,6 +5,7 @@
     android:layout_height="@dimen/playback_trick_card_height"
     android:layout_marginEnd="8dp"
     android:background="@drawable/bg_playback_trick_card"
+    android:foreground="@drawable/fg_playback_trick_focus"
     android:clickable="true"
     android:focusable="true"
     android:descendantFocusability="blocksDescendants">
@@ -14,12 +15,15 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:contentDescription="@null"
+        android:focusable="false"
+        android:clickable="false"
         android:scaleType="centerCrop"
         tools:background="#333" />
 
     <View
         android:layout_width="match_parent"
         android:layout_height="match_parent"
+        android:layout_margin="2dp"
         android:background="#66000000" />
 
     <TextView
@@ -28,6 +32,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:background="@drawable/bg_playback_trick_time_banner"
+        android:clickable="false"
+        android:focusable="false"
         android:gravity="center"
         android:paddingTop="4dp"
         android:paddingBottom="4dp"

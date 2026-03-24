@@ -27,6 +27,7 @@ import java.util.Locale
 /**
  * Plays VOD and live IPTV via LibVLC. Bottom overlay: preview-style strip + progress for seekable content;
  * live / non-seekable shows timeline row only (no strip).
+ * Seekable VOD: DPAD left/right on the video opens chapter cards; Enter closes the strip (or play/pause when hidden).
  */
 class PlaybackVideoFragment : Fragment() {
 
@@ -47,6 +48,8 @@ class PlaybackVideoFragment : Fragment() {
     private var posterUrl: String? = null
     /** Last duration used to build trick strip; rebuild when LibVLC reports a new length. */
     private var trickStripBuiltForLengthMs: Long = -1L
+    /** Seek chapter cards visible (DPAD left/right on video); playback paused while visible. */
+    private var trickStripUserVisible: Boolean = false
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -103,7 +106,7 @@ class PlaybackVideoFragment : Fragment() {
         trickAdapter = TrickStripAdapter(
             posterUrl = posterUrl,
             slots = trickSlots,
-            onSeek = { ms -> seekToMs(ms) },
+            onActivateCard = { ms -> activateTrickCardAndResume(ms) },
             onRequestFocusVideo = { videoLayout.requestFocus() },
         )
         trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
@@ -122,11 +125,40 @@ class PlaybackVideoFragment : Fragment() {
         videoLayout.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                -> {
+                    val p = mediaPlayer ?: return@setOnKeyListener false
+                    val len = mediaLengthMs(p)
+                    val seekable = p.isSeekable && len > 1_000L && trickSlots.isNotEmpty()
+                    if (!seekable) return@setOnKeyListener false
+                    if (trickStripUserVisible || trickRv.isVisible) {
+                        if (trickAdapter.itemCount > 0) {
+                            focusTrickNearCurrentTime()
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        trickStripUserVisible = true
+                        trickRv.isVisible = true
+                        if (p.isPlaying) p.pause()
+                        focusTrickNearCurrentTime()
+                        updatePlaybackControlsUi()
+                        true
+                    }
+                }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
-                    mediaPlayer?.let { p ->
+                    val p = mediaPlayer ?: return@setOnKeyListener false
+                    if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
+                        trickStripUserVisible = false
+                        trickRv.isVisible = false
+                        if (!p.isPlaying) p.play()
+                        updatePlaybackControlsUi()
+                    } else {
                         if (p.isPlaying) p.pause() else p.play()
                     }
                     true
@@ -223,12 +255,15 @@ class PlaybackVideoFragment : Fragment() {
         v.post(progressTicker)
     }
 
-    private fun seekToMs(ms: Long) {
+    /** Seek to chapter, dismiss strip, resume playback, return focus to video. */
+    private fun activateTrickCardAndResume(ms: Long) {
         val p = mediaPlayer ?: return
-        runCatching {
-            p.setTime(ms)
-            if (!p.isPlaying) p.play()
-        }.onFailure { Log.w(TAG, "seek failed", it) }
+        runCatching { p.setTime(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
+        trickStripUserVisible = false
+        trickRv.isVisible = false
+        if (!p.isPlaying) p.play()
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
     }
 
     private fun focusTrickNearCurrentTime() {
@@ -252,7 +287,6 @@ class PlaybackVideoFragment : Fragment() {
         controlsOverlay.isVisible = true
 
         if (seekable) {
-            trickRv.isVisible = true
             if (len != trickStripBuiltForLengthMs) {
                 trickStripBuiltForLengthMs = len
                 trickSlots.clear()
@@ -263,9 +297,11 @@ class PlaybackVideoFragment : Fragment() {
                 }
                 trickAdapter.notifyDataSetChanged()
             }
+            trickRv.isVisible = trickStripUserVisible && trickSlots.isNotEmpty()
             timeTotal.text = formatPlaybackTimeMs(len)
         } else {
             trickStripBuiltForLengthMs = -1L
+            trickStripUserVisible = false
             trickRv.isVisible = false
             trickSlots.clear()
             trickAdapter.notifyDataSetChanged()
@@ -280,9 +316,11 @@ class PlaybackVideoFragment : Fragment() {
         val cur = p.time.coerceAtLeast(0L)
         timeCurrent.text = formatPlaybackTimeMs(cur)
 
-        val showProgress = len > 0L && p.isSeekable
+        // Timeline + bar while playing, and while chapter cards are open (same seekable VOD).
+        val seekable = p.isSeekable && (len > 1_000L || trickStripUserVisible)
+        val showProgress = seekable && (len > 0L || trickStripUserVisible)
         progressBar.isVisible = showProgress
-        if (showProgress) {
+        if (showProgress && len > 0L) {
             val ratio = (cur * 1000L / len).toInt().coerceIn(0, 1000)
             progressBar.progress = ratio
         } else {
@@ -410,7 +448,7 @@ private data class TrickSlot(val startMs: Long, val label: String)
 private class TrickStripAdapter(
     private val posterUrl: String?,
     private val slots: List<TrickSlot>,
-    private val onSeek: (Long) -> Unit,
+    private val onActivateCard: (Long) -> Unit,
     private val onRequestFocusVideo: () -> Unit,
 ) : RecyclerView.Adapter<TrickStripAdapter.VH>() {
 
@@ -440,8 +478,7 @@ private class TrickStripAdapter(
             if (position == 0) R.id.vlc_video_layout else View.NO_ID
 
         holder.itemView.setOnClickListener {
-            holder.itemView.requestFocus()
-            onSeek(slot.startMs)
+            onActivateCard(slot.startMs)
         }
         holder.itemView.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
@@ -450,7 +487,7 @@ private class TrickStripAdapter(
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
-                    onSeek(slot.startMs)
+                    onActivateCard(slot.startMs)
                     true
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
