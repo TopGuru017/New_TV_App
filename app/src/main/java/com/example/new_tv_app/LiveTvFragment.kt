@@ -161,6 +161,10 @@ class LiveTvFragment : Fragment() {
                 val id = selectedCategoryId
                 categoryAdapter.findName(id) ?: "—"
             },
+            focusCategoryAt = { index ->
+                categoriesRv.scrollToPosition(index)
+                requestFocusCategoryAfterScroll(categoriesRv, index)
+            },
             onChannelFocused = { stream, categoryName ->
                 showDetail(stream, categoryName)
             },
@@ -476,6 +480,7 @@ private class LiveChannelAdapter(
     private val categoriesRecyclerView: RecyclerView,
     private val selectedCategoryIndex: () -> Int,
     private val categoryNameProvider: () -> String,
+    private val focusCategoryAt: (Int) -> Unit,
     private val onChannelFocused: (LiveStream, String) -> Unit,
     private val onChannelPlay: (LiveStream, String) -> Unit,
 ) : RecyclerView.Adapter<LiveChannelAdapter.VH>() {
@@ -502,8 +507,9 @@ private class LiveChannelAdapter(
         val stream = items[position]
         holder.name.text = stream.name
         val col = position % spanCount
+        val catIdx = selectedCategoryIndex()
         holder.itemView.nextFocusLeftId =
-            if (col == 0) sidebarFocusAnchorId else View.NO_ID
+            if (col == 0 && catIdx <= 0) sidebarFocusAnchorId else View.NO_ID
         holder.itemView.nextFocusUpId = View.NO_ID
         val url = stream.iconUrl
         if (url.isNullOrBlank()) {
@@ -514,10 +520,27 @@ private class LiveChannelAdapter(
         }
         holder.itemView.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            val idx = selectedCategoryIndex()
+            val n = categoriesRecyclerView.adapter?.itemCount ?: 0
             when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    if (col == 0 && idx > 0) {
+                        focusCategoryAt(idx - 1)
+                        true
+                    } else {
+                        false
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    if (col == spanCount - 1 && idx < n - 1) {
+                        focusCategoryAt(idx + 1)
+                        true
+                    } else {
+                        false
+                    }
+                }
                 KeyEvent.KEYCODE_DPAD_UP -> {
                     if (position < spanCount) {
-                        val idx = selectedCategoryIndex()
                         categoriesRecyclerView.scrollToPosition(idx)
                         requestFocusCategoryAfterScroll(categoriesRecyclerView, idx)
                         true

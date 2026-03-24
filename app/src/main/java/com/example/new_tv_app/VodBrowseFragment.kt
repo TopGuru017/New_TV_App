@@ -190,6 +190,10 @@ class VodBrowseFragment : Fragment() {
                 val id = selectedCategoryId
                 catalogAdapter.findName(id) ?: "—"
             },
+            focusCategoryAt = { index ->
+                categoriesRv.scrollToPosition(index)
+                requestFocusVodCategoryAfterScroll(categoriesRv, index)
+            },
             movies = movies,
             shows = shows,
             onMovieFocused = { m, cat -> showMovieDetail(m, cat) },
@@ -555,6 +559,7 @@ private class VodGridAdapter(
     private val categoriesRecyclerView: RecyclerView,
     private val selectedCategoryIndex: () -> Int,
     private val categoryNameProvider: () -> String,
+    private val focusCategoryAt: (Int) -> Unit,
     private val movies: MutableList<VodMovieItem>,
     private val shows: MutableList<SeriesShow>,
     private val onMovieFocused: (VodMovieItem, String) -> Unit,
@@ -574,8 +579,9 @@ private class VodGridAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val col = position % spanCount
+        val catIdx = selectedCategoryIndex()
         holder.itemView.nextFocusLeftId =
-            if (col == 0) sidebarFocusAnchorId else View.NO_ID
+            if (col == 0 && catIdx <= 0) sidebarFocusAnchorId else View.NO_ID
         holder.itemView.nextFocusUpId = View.NO_ID
 
         if (mode == VodBrowseFragment.MODE_MOVIES) {
@@ -584,10 +590,27 @@ private class VodGridAdapter(
             loadGridIcon(holder.icon, m.coverUrl)
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                val idx = selectedCategoryIndex()
+                val n = categoriesRecyclerView.adapter?.itemCount ?: 0
                 when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        if (col == 0 && idx > 0) {
+                            focusCategoryAt(idx - 1)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        if (col == spanCount - 1 && idx < n - 1) {
+                            focusCategoryAt(idx + 1)
+                            true
+                        } else {
+                            false
+                        }
+                    }
                     KeyEvent.KEYCODE_DPAD_UP -> {
                         if (position < spanCount) {
-                            val idx = selectedCategoryIndex()
                             categoriesRecyclerView.scrollToPosition(idx)
                             requestFocusVodCategoryAfterScroll(categoriesRecyclerView, idx)
                             true
@@ -617,10 +640,27 @@ private class VodGridAdapter(
             loadGridIcon(holder.icon, s.coverUrl)
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                val idx = selectedCategoryIndex()
+                val n = categoriesRecyclerView.adapter?.itemCount ?: 0
                 when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        if (col == 0 && idx > 0) {
+                            focusCategoryAt(idx - 1)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        if (col == spanCount - 1 && idx < n - 1) {
+                            focusCategoryAt(idx + 1)
+                            true
+                        } else {
+                            false
+                        }
+                    }
                     KeyEvent.KEYCODE_DPAD_UP -> {
                         if (position < spanCount) {
-                            val idx = selectedCategoryIndex()
                             categoriesRecyclerView.scrollToPosition(idx)
                             requestFocusVodCategoryAfterScroll(categoriesRecyclerView, idx)
                             true
