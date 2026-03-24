@@ -23,6 +23,8 @@
             android:ellipsize="start"
             android:focusable="true"
             android:gravity="center"
+            android:textDirection="locale"
+            android:textAlignment="viewStart"
             android:hint="@string/search_placeholder"
             android:minHeight="@dimen/search_field_min_height"
             android:paddingStart="16dp"

@@ -48,7 +48,7 @@
     <string name="favorites_empty">Favorites list is empty :-(</string>
 
     <!-- Search -->
-    <string name="search_placeholder">Type search keywords here…</string>
+    <string name="search_placeholder">הקלד מילות חיפוש…</string>
     <string name="search_keyboard_space">Space</string>
     <string name="search_keyboard_123">123</string>
     <string name="search_keyboard_search">Search</string>
@@ -64,7 +64,11 @@
     <string name="search_section_vod_series">VOD - Series</string>
     <string name="search_section_vod_movies">VOD - Movies</string>
     <string name="search_result_id_fmt">Result: %1$s</string>
-    <string name="search_cd_globe">Switch letter case</string>
+    <string name="search_cd_globe">Switch Hebrew / English keyboard</string>
+    <string name="search_keyboard_script_hebrew">עב</string>
+    <string name="search_keyboard_script_english">EN</string>
+    <string name="search_keyboard_script_letters">אב</string>
+    <string name="search_keyboard_case">Aa</string>
     <string name="search_cd_backspace">Backspace</string>
 
     <!-- Profile screen -->

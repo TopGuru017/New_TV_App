@@ -41,6 +41,9 @@ private const val MAX_QUERY_LEN = 256
 private const val MAX_RECORDINGS_ROW = 30
 private const val MAX_VOD_ROW = 40
 
+/** Hebrew letters + final forms (typical on-screen keyboard order). */
+private const val HEBREW_LETTERS = "אבגדהוזחטיכךלמםנןסעפףצץקרשת"
+
 /**
  * TV search: keyboard, then horizontal rows — recordings (live channels), VOD series, VOD movies.
  */
@@ -48,6 +51,8 @@ class SearchFragment : Fragment() {
 
     private val queryBuilder = StringBuilder()
     private var numericKeyboard = false
+    /** When false, letter row is English (a–z). When true, letter row is Hebrew. Default Hebrew for search. */
+    private var hebrewKeyboard = true
     private var upperCaseLetters = false
 
     private var allLive: List<LiveStream>? = null
@@ -237,7 +242,7 @@ class SearchFragment : Fragment() {
     }
 
     private fun toggleCase() {
-        if (numericKeyboard) return
+        if (numericKeyboard || hebrewKeyboard) return
         upperCaseLetters = !upperCaseLetters
         rebuildKeyboard()
         focusFirstKeyboardKey()
@@ -259,8 +264,32 @@ class SearchFragment : Fragment() {
         data class Slot(val view: View, val weight: Float)
         val slots = mutableListOf<Slot>()
 
+        val scriptLabel = when {
+            numericKeyboard -> getString(R.string.search_keyboard_script_letters)
+            hebrewKeyboard -> getString(R.string.search_keyboard_script_english)
+            else -> getString(R.string.search_keyboard_script_hebrew)
+        }
         slots += Slot(
-            makeIconKey(ctx, R.drawable.ic_search_globe, R.string.search_cd_globe, padCompact, iconPadV) { toggleCase() },
+            makeLabelKey(ctx, scriptLabel, padCompact, 11.5f) {
+                when {
+                    numericKeyboard -> {
+                        numericKeyboard = false
+                        rebuildKeyboard()
+                        focusFirstKeyboardKey()
+                    }
+                    hebrewKeyboard -> {
+                        hebrewKeyboard = false
+                        rebuildKeyboard()
+                        focusFirstKeyboardKey()
+                    }
+                    else -> {
+                        hebrewKeyboard = true
+                        upperCaseLetters = false
+                        rebuildKeyboard()
+                        focusFirstKeyboardKey()
+                    }
+                }
+            }.also { it.contentDescription = ctx.getString(R.string.search_cd_globe) },
             1f,
         )
         slots += Slot(
@@ -272,11 +301,26 @@ class SearchFragment : Fragment() {
             2.4f,
         )
 
+        if (!numericKeyboard && !hebrewKeyboard) {
+            slots += Slot(
+                makeLabelKey(ctx, getString(R.string.search_keyboard_case), padCompact, 11f) { toggleCase() },
+                1f,
+            )
+        }
+
         if (numericKeyboard) {
             val nums = "1234567890.,-_ '\"!?"
             for (ch in nums) {
                 slots += Slot(
                     makeLabelKey(ctx, ch.toString(), padCompact, 12f) { appendChar(ch.toString()) },
+                    1f,
+                )
+            }
+        } else if (hebrewKeyboard) {
+            for (ch in HEBREW_LETTERS) {
+                val s = ch.toString()
+                slots += Slot(
+                    makeLabelKey(ctx, s, padCompact, 12f) { appendChar(s) },
                     1f,
                 )
             }
