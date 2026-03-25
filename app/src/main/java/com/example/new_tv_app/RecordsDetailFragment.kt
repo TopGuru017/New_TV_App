@@ -615,6 +615,7 @@ private class RecordsProgramsAdapter(
         }
         holder.itemView.nextFocusLeftId = View.NO_ID
         holder.itemView.nextFocusUpId = View.NO_ID
+        holder.itemView.nextFocusDownId = View.NO_ID
         holder.itemView.setOnFocusChangeListener { _, hasFocus ->
             holder.playOverlay.isVisible = hasFocus
             if (hasFocus) {
@@ -629,7 +630,28 @@ private class RecordsProgramsAdapter(
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             val pos = holder.bindingAdapterPosition
             if (pos == RecyclerView.NO_POSITION) return@setOnKeyListener false
+            val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
+            val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
             when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (pos >= itemCount - 1) {
+                        true
+                    } else {
+                        val next = pos + 1
+                        if (lm.findViewByPosition(next) != null) {
+                            val nh = rv.findViewHolderForAdapterPosition(next)
+                            if (nh != null) {
+                                nh.itemView.requestFocus()
+                            } else {
+                                requestFocusRecyclerChildAfterScroll(rv, next)
+                            }
+                        } else {
+                            rv.scrollToPosition(next)
+                            requestFocusRecyclerChildAfterScroll(rv, next)
+                        }
+                        true
+                    }
+                }
                 KeyEvent.KEYCODE_DPAD_LEFT -> onDpadLeftFromProgram()
                 KeyEvent.KEYCODE_DPAD_UP ->
                     if (pos == 0) onDpadUpFromFirstProgram() else false
