@@ -16,6 +16,12 @@ object IptvStreamUrls {
         return "$base/live/$u/$p/$id.m3u8"
     }
 
+    /** True for Xtream-style live URLs; used to disable seek / trick-play UI (live is not movable). */
+    fun isPanelLiveStreamUrl(url: String): Boolean {
+        val path = Uri.parse(url.trim()).path ?: return false
+        return path.split('/').any { it.equals("live", ignoreCase = true) }
+    }
+
     fun vodMovieUrl(streamId: String, containerExtension: String): String {
         val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")

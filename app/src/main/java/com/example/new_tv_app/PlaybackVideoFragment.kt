@@ -29,7 +29,8 @@ import java.util.Locale
 
 /**
  * Plays VOD and live IPTV via LibVLC. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
- * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown.
+ * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
+ * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
  * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down toggles a vertical
  * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
  * still applies when the stream is seekable.
@@ -183,6 +184,9 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_DPAD_LEFT,
                 KeyEvent.KEYCODE_DPAD_RIGHT,
                 -> {
+                    if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
+                        return@setOnKeyListener true
+                    }
                     val p = mediaPlayer ?: return@setOnKeyListener false
                     val len = mediaLengthMs(p)
                     val seekable = p.isSeekable && len > 1_000L && trickSlots.isNotEmpty()
@@ -398,6 +402,16 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun rebuildTrickStripIfNeeded() {
         val p = mediaPlayer ?: return
+        if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
+            trickStripBuiltForLengthMs = -1L
+            trickStripUserVisible = false
+            trickRv.isVisible = false
+            trickSlots.clear()
+            trickAdapter.notifyDataSetChanged()
+            timeTotal.text = getString(R.string.playback_live)
+            updatePlaybackControlsUi()
+            return
+        }
         val len = mediaLengthMs(p)
         val seekable = p.isSeekable && len > 1_000L
 
