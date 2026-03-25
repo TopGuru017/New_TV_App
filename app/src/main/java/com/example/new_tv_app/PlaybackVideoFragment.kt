@@ -8,10 +8,13 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.ImageView.ScaleType
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import android.graphics.PorterDuff
+import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.view.isVisible
 import androidx.core.view.doOnLayout
@@ -578,7 +581,9 @@ class PlaybackVideoFragment : Fragment() {
                 val step = (len / TRICK_SLOT_COUNT).coerceAtLeast(1L)
                 for (i in 0 until TRICK_SLOT_COUNT) {
                     val start = (i * step).coerceAtMost((len - 1L).coerceAtLeast(0L))
-                    trickSlots.add(TrickSlot(start, formatPlaybackTimeMs(start)))
+                    val label = formatPlaybackTimeMs(start)
+                    val thumb = thumbnailUrlForTrickSlot(start, step, len)
+                    trickSlots.add(TrickSlot(start, label, thumb))
                 }
                 trickAdapter.notifyDataSetChanged()
             }
@@ -593,6 +598,27 @@ class PlaybackVideoFragment : Fragment() {
             timeTotal.text = getString(R.string.playback_live)
         }
         updatePlaybackControlsUi()
+    }
+
+    private fun currentArchiveAnchorListing(): EpgListing? {
+        if (recordsArchiveStreamId.isNullOrEmpty() || recordsDayListings.isEmpty()) return null
+        return recordsDayListings.find { (it.startUnix xor it.endUnix) == currentArchiveListingId }
+    }
+
+    /**
+     * Thumbnail for a seek chapter: EPG image at that offset when archive day list is available,
+     * else [posterUrl] (VOD / fallback).
+     */
+    private fun thumbnailUrlForTrickSlot(startOffsetMs: Long, stepMs: Long, mediaLenMs: Long): String? {
+        val fallback = posterUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val anchor = currentArchiveAnchorListing() ?: return fallback
+        val halfStep = (stepMs / 2L).coerceAtLeast(0L)
+        val midOffset = (startOffsetMs + halfStep).coerceIn(0L, (mediaLenMs - 1L).coerceAtLeast(0L))
+        val wallSec = anchor.startUnix + midOffset / 1000L
+        val hit = recordsDayListings.find { wallSec >= it.startUnix && wallSec < it.endUnix }
+        val fromListing = hit?.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+            ?: anchor.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        return fromListing ?: fallback
     }
 
     private fun updatePlaybackControlsUi() {
@@ -736,7 +762,12 @@ class PlaybackVideoFragment : Fragment() {
     }
 }
 
-private data class TrickSlot(val startMs: Long, val label: String)
+private data class TrickSlot(
+    val startMs: Long,
+    val label: String,
+    /** Poster / EPG still for this segment; null uses placeholder in UI. */
+    val thumbnailUrl: String?,
+)
 
 /** Vertical channel cards for live playback (DPAD up/down in column). */
 private class LivePlaybackChannelColumnAdapter(
@@ -876,12 +907,24 @@ private class RecordsColumnPlaybackAdapter(
         holder.itemView.contentDescription =
             holder.itemView.context.getString(R.string.playback_cd_trick_seek, timeLabel)
 
-        val img = listing.imageUrl
-        if (img.isNullOrBlank()) {
+        val img = listing.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (img.isNullOrEmpty()) {
             Glide.with(holder.thumb).clear(holder.thumb)
-            holder.thumb.setImageDrawable(null)
+            holder.thumb.scaleType = ScaleType.CENTER_INSIDE
+            holder.thumb.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
+            holder.thumb.setColorFilter(
+                ContextCompat.getColor(holder.thumb.context, R.color.sidebar_accent_cyan),
+                PorterDuff.Mode.SRC_IN,
+            )
         } else {
-            Glide.with(holder.thumb).load(img).centerCrop().into(holder.thumb)
+            holder.thumb.clearColorFilter()
+            holder.thumb.scaleType = ScaleType.CENTER_CROP
+            Glide.with(holder.thumb)
+                .load(img)
+                .placeholder(R.drawable.ic_playback_timeslot_placeholder)
+                .error(R.drawable.ic_playback_timeslot_placeholder)
+                .centerCrop()
+                .into(holder.thumb)
         }
 
         holder.itemView.nextFocusLeftId = videoFocusId
@@ -966,12 +1009,20 @@ private class TrickStripAdapter(
         holder.itemView.contentDescription =
             holder.itemView.context.getString(R.string.playback_cd_trick_seek, slot.label)
 
-        val url = posterUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val url = slot.thumbnailUrl?.trim()?.takeIf { it.isNotEmpty() }
+            ?: posterUrl?.trim()?.takeIf { it.isNotEmpty() }
         if (url.isNullOrEmpty()) {
             Glide.with(holder.poster).clear(holder.poster)
-            holder.poster.setImageDrawable(null)
+            holder.poster.scaleType = ScaleType.CENTER_INSIDE
+            holder.poster.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
         } else {
-            Glide.with(holder.poster).load(url).centerCrop().into(holder.poster)
+            holder.poster.scaleType = ScaleType.CENTER_CROP
+            Glide.with(holder.poster)
+                .load(url)
+                .placeholder(R.drawable.ic_playback_timeslot_placeholder)
+                .error(R.drawable.ic_playback_timeslot_placeholder)
+                .centerCrop()
+                .into(holder.poster)
         }
 
         holder.itemView.nextFocusLeftId =
