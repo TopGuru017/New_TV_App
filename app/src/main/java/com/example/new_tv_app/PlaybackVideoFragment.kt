@@ -38,8 +38,8 @@ import java.util.Locale
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
  * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
  * Live channel picker ([PlaybackActivity.LIVE_CATEGORY_ID] + [PlaybackActivity.LIVE_STREAM_ID]): DPAD up/down
- * toggles a vertical column of channel cards on the **left**; up/down to move, OK to switch stream, right/back
- * to dismiss.
+ * on the video toggles the column; inside the column, up/down moves between cards (no-op at first/last row),
+ * OK switches stream, right/back dismisses.
  * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down toggles a vertical
  * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
  * still applies when the stream is seekable.
@@ -757,7 +757,7 @@ private class LivePlaybackChannelColumnAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val v = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_live_channel, parent, false)
+            .inflate(R.layout.item_playback_live_channel, parent, false)
         return VH(v)
     }
 
@@ -785,10 +785,7 @@ private class LivePlaybackChannelColumnAdapter(
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> {
                     when {
-                        pos == 0 -> {
-                            onCloseColumn()
-                            true
-                        }
+                        pos == 0 -> true
                         lm.findViewByPosition(pos - 1) != null -> false
                         else -> {
                             val prev = pos - 1
