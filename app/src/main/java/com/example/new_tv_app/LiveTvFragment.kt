@@ -176,9 +176,14 @@ class LiveTvFragment : Fragment() {
                     videoUrl = url,
                     studio = null,
                 )
+                val catId = stream.categoryId ?: selectedCategoryId
                 startActivity(
                     Intent(requireContext(), PlaybackActivity::class.java).apply {
                         putExtra(DetailsActivity.MOVIE, movie)
+                        if (!catId.isNullOrBlank()) {
+                            putExtra(PlaybackActivity.LIVE_CATEGORY_ID, catId)
+                            putExtra(PlaybackActivity.LIVE_STREAM_ID, stream.streamId)
+                        }
                     }
                 )
             },

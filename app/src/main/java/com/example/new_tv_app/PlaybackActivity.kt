@@ -11,6 +11,10 @@ class PlaybackActivity : FragmentActivity() {
         const val RECORDS_ARCHIVE_STREAM_ID = "records_archive_stream_id"
         /** Same order as the Records day list; enables day column UI during playback. */
         const val RECORDS_DAY_LISTINGS = "records_day_listings"
+        /** Live TV: category id for the vertical channel picker (DPAD up/down during live). */
+        const val LIVE_CATEGORY_ID = "live_category_id"
+        /** Live TV: Xtream stream id currently playing (focus in picker). */
+        const val LIVE_STREAM_ID = "live_stream_id"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

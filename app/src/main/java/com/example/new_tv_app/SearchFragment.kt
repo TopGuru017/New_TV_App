@@ -591,9 +591,14 @@ class SearchFragment : Fragment() {
             videoUrl = url,
             studio = null,
         )
+        val catId = stream.categoryId?.trim()?.takeIf { it.isNotEmpty() }
         startActivity(
             Intent(requireContext(), PlaybackActivity::class.java).apply {
                 putExtra(DetailsActivity.MOVIE, movie)
+                if (catId != null) {
+                    putExtra(PlaybackActivity.LIVE_CATEGORY_ID, catId)
+                    putExtra(PlaybackActivity.LIVE_STREAM_ID, stream.streamId)
+                }
             },
         )
     }

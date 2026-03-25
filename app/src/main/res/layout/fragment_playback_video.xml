@@ -79,6 +79,29 @@
         </LinearLayout>
     </LinearLayout>
 
+    <!-- Live only: vertical channel cards on the left (DPAD up/down on video to toggle). -->
+    <FrameLayout
+        android:id="@+id/playback_live_channels_container"
+        android:layout_width="220dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="#CC05070A"
+        android:focusable="false"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/playback_live_channels_rv"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:overScrollMode="never"
+            android:paddingStart="12dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="16dp" />
+    </FrameLayout>
+
     <!-- Records catch-up only: vertical list for the selected day (DPAD up/down on video). -->
     <FrameLayout
         android:id="@+id/playback_records_column_container"

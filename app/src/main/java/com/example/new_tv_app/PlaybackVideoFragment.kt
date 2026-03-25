@@ -11,16 +11,22 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.core.content.IntentCompat
 import androidx.core.view.isVisible
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LiveStream
+import com.example.new_tv_app.iptv.XtreamLiveApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -31,6 +37,9 @@ import java.util.Locale
  * Plays VOD and live IPTV via LibVLC. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
  * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
+ * Live channel picker ([PlaybackActivity.LIVE_CATEGORY_ID] + [PlaybackActivity.LIVE_STREAM_ID]): DPAD up/down
+ * toggles a vertical column of channel cards on the **left**; up/down to move, OK to switch stream, right/back
+ * to dismiss.
  * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down toggles a vertical
  * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
  * still applies when the stream is seekable.
@@ -65,6 +74,15 @@ class PlaybackVideoFragment : Fragment() {
     private var recordsColumnUserVisible: Boolean = false
     private var currentArchiveListingId: Long = 0L
     private lateinit var recordsColumnAdapter: RecordsColumnPlaybackAdapter
+
+    private lateinit var liveChannelColumnContainer: View
+    private lateinit var liveChannelColumnRv: RecyclerView
+    private lateinit var liveChannelColumnAdapter: LivePlaybackChannelColumnAdapter
+    private var liveChannelColumnUserVisible: Boolean = false
+    private var liveChannelsLoadJob: Job? = null
+    private var liveCategoryId: String? = null
+    private var livePlaybackStreamId: String? = null
+    private lateinit var backCloseLiveChannelColumn: OnBackPressedCallback
 
     private val progressTicker = object : Runnable {
         override fun run() {
@@ -121,6 +139,15 @@ class PlaybackVideoFragment : Fragment() {
             }
         }
 
+        liveCategoryId =
+            requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_CATEGORY_ID)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+        livePlaybackStreamId =
+            requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_STREAM_ID)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+
         currentPlaybackUrl = url
         didCrossProtocolRetry = false
         logPlaybackTarget(url, movie.title)
@@ -150,6 +177,26 @@ class PlaybackVideoFragment : Fragment() {
         recordsColumnRv.adapter = recordsColumnAdapter
         recordsColumnRv.itemAnimator = null
         recordsColumnContainer.isVisible = false
+
+        liveChannelColumnContainer = view.findViewById(R.id.playback_live_channels_container)
+        liveChannelColumnRv = view.findViewById(R.id.playback_live_channels_rv)
+        backCloseLiveChannelColumn = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                closeLiveChannelColumnAndResume()
+            }
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backCloseLiveChannelColumn)
+
+        liveChannelColumnAdapter = LivePlaybackChannelColumnAdapter(
+            onStreamPicked = { stream -> switchLiveStreamFromColumn(stream) },
+            onCloseColumn = { closeLiveChannelColumnAndResume() },
+            videoFocusId = R.id.vlc_video_layout,
+        )
+        liveChannelColumnRv.layoutManager = LinearLayoutManager(requireContext())
+        liveChannelColumnRv.adapter = liveChannelColumnAdapter
+        liveChannelColumnRv.itemAnimator = null
+        liveChannelColumnContainer.isVisible = false
+
         trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
         trickRv.setHasFixedSize(true)
         trickRv.itemAnimator = null
@@ -173,8 +220,14 @@ class PlaybackVideoFragment : Fragment() {
                         toggleRecordsColumn()
                         return@setOnKeyListener true
                     }
+                    if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl) && isLiveChannelPickerEligible()) {
+                        toggleLiveChannelColumn()
+                        return@setOnKeyListener true
+                    }
                     if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        if (trickRv.isVisible && trickAdapter.itemCount > 0) {
+                        if (!IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl) &&
+                            trickRv.isVisible && trickAdapter.itemCount > 0
+                        ) {
                             focusTrickNearCurrentTime()
                             return@setOnKeyListener true
                         }
@@ -214,7 +267,9 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
                     val p = mediaPlayer ?: return@setOnKeyListener false
-                    if (recordsColumnUserVisible) {
+                    if (liveChannelColumnUserVisible) {
+                        closeLiveChannelColumnAndResume()
+                    } else if (recordsColumnUserVisible) {
                         closeRecordsColumnAndResume()
                     } else if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
                         trickStripUserVisible = false
@@ -292,6 +347,7 @@ class PlaybackVideoFragment : Fragment() {
 
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/detach/release")
+        liveChannelsLoadJob?.cancel()
         view?.removeCallbacks(progressTicker)
         mediaPlayer?.let { p ->
             p.stop()
@@ -302,6 +358,106 @@ class PlaybackVideoFragment : Fragment() {
         libVLC?.release()
         libVLC = null
         super.onDestroyView()
+    }
+
+    private fun isLiveChannelPickerEligible(): Boolean =
+        !liveCategoryId.isNullOrEmpty() && !livePlaybackStreamId.isNullOrEmpty()
+
+    private fun toggleLiveChannelColumn() {
+        if (liveChannelColumnUserVisible) {
+            closeLiveChannelColumnAndResume()
+        } else {
+            openLiveChannelColumn()
+        }
+    }
+
+    private fun openLiveChannelColumn() {
+        val catId = liveCategoryId ?: return
+        if (!IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) return
+        liveChannelColumnUserVisible = true
+        liveChannelColumnContainer.isVisible = true
+        backCloseLiveChannelColumn.isEnabled = true
+        mediaPlayer?.pause()
+        liveChannelsLoadJob?.cancel()
+        liveChannelsLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = XtreamLiveApi.fetchLiveStreams(catId)
+            if (!isAdded || !liveChannelColumnUserVisible) return@launch
+            result.fold(
+                onSuccess = { streams ->
+                    liveChannelColumnAdapter.submit(streams)
+                    val sid = livePlaybackStreamId
+                    val idx = if (sid != null) {
+                        streams.indexOfFirst { it.streamId == sid }.let { i -> if (i >= 0) i else 0 }
+                    } else {
+                        0
+                    }
+                    if (streams.isNotEmpty()) {
+                        val safe = idx.coerceIn(0, streams.lastIndex)
+                        liveChannelColumnRv.scrollToPosition(safe)
+                        requestFocusLiveChannelPosition(safe)
+                    }
+                },
+                onFailure = {
+                    Toast.makeText(
+                        requireContext(),
+                        R.string.live_load_error,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    closeLiveChannelColumnAndResume()
+                },
+            )
+        }
+    }
+
+    private fun requestFocusLiveChannelPosition(adapterPosition: Int) {
+        liveChannelColumnRv.post {
+            val h = liveChannelColumnRv.findViewHolderForAdapterPosition(adapterPosition)
+            if (h != null) {
+                h.itemView.requestFocus()
+            } else {
+                liveChannelColumnRv.postDelayed(
+                    {
+                        liveChannelColumnRv.findViewHolderForAdapterPosition(adapterPosition)
+                            ?.itemView
+                            ?.requestFocus()
+                    },
+                    64L,
+                )
+            }
+        }
+    }
+
+    private fun closeLiveChannelColumnAndResume() {
+        if (!liveChannelColumnUserVisible) return
+        liveChannelColumnUserVisible = false
+        liveChannelColumnContainer.isVisible = false
+        backCloseLiveChannelColumn.isEnabled = false
+        liveChannelsLoadJob?.cancel()
+        liveChannelsLoadJob = null
+        mediaPlayer?.play()
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
+    }
+
+    private fun switchLiveStreamFromColumn(stream: LiveStream) {
+        livePlaybackStreamId = stream.streamId
+        posterUrl = sequenceOf(stream.iconUrl, posterUrl).firstOrNull { !it.isNullOrBlank() }
+        trickAdapter.setPosterUrl(posterUrl)
+        trickStripBuiltForLengthMs = -1L
+        trickStripUserVisible = false
+        trickRv.isVisible = false
+        liveChannelColumnUserVisible = false
+        liveChannelColumnContainer.isVisible = false
+        backCloseLiveChannelColumn.isEnabled = false
+        liveChannelsLoadJob?.cancel()
+        liveChannelsLoadJob = null
+        val player = mediaPlayer ?: return
+        runCatching { player.stop() }
+        val newUrl = IptvStreamUrls.liveStreamUrl(stream.streamId)
+        startPlayback(player, newUrl)
+        videoLayout.requestFocus()
+        player.play()
+        updatePlaybackControlsUi()
     }
 
     private fun startProgressTicker() {
@@ -581,6 +737,124 @@ class PlaybackVideoFragment : Fragment() {
 }
 
 private data class TrickSlot(val startMs: Long, val label: String)
+
+/** Vertical channel cards for live playback (DPAD up/down in column). */
+private class LivePlaybackChannelColumnAdapter(
+    private val onStreamPicked: (LiveStream) -> Unit,
+    private val onCloseColumn: () -> Unit,
+    private val videoFocusId: Int,
+) : RecyclerView.Adapter<LivePlaybackChannelColumnAdapter.VH>() {
+
+    private val items = mutableListOf<LiveStream>()
+
+    fun submit(list: List<LiveStream>) {
+        items.clear()
+        items.addAll(list)
+        notifyDataSetChanged()
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+        val v = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_live_channel, parent, false)
+        return VH(v)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int) {
+        val stream = items[position]
+        holder.name.text = stream.name
+        val iconUrl = stream.iconUrl
+        if (iconUrl.isNullOrBlank()) {
+            Glide.with(holder.icon).clear(holder.icon)
+            holder.icon.setImageDrawable(null)
+        } else {
+            Glide.with(holder.icon).load(iconUrl).fitCenter().into(holder.icon)
+        }
+        holder.itemView.nextFocusRightId = videoFocusId
+        holder.itemView.setOnClickListener {
+            holder.itemView.requestFocus()
+            onStreamPicked(stream)
+        }
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            val pos = holder.bindingAdapterPosition
+            if (pos == RecyclerView.NO_POSITION) return@setOnKeyListener false
+            val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
+            val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    when {
+                        pos == 0 -> {
+                            onCloseColumn()
+                            true
+                        }
+                        lm.findViewByPosition(pos - 1) != null -> false
+                        else -> {
+                            val prev = pos - 1
+                            rv.scrollToPosition(prev)
+                            rv.post {
+                                val h = rv.findViewHolderForAdapterPosition(prev)
+                                if (h != null) {
+                                    h.itemView.requestFocus()
+                                } else {
+                                    rv.postDelayed(
+                                        {
+                                            rv.findViewHolderForAdapterPosition(prev)?.itemView?.requestFocus()
+                                        },
+                                        64L,
+                                    )
+                                }
+                            }
+                            true
+                        }
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (pos >= itemCount - 1) {
+                        true
+                    } else if (lm.findViewByPosition(pos + 1) != null) {
+                        false
+                    } else {
+                        val next = pos + 1
+                        rv.scrollToPosition(next)
+                        rv.post {
+                            val h = rv.findViewHolderForAdapterPosition(next)
+                            if (h != null) {
+                                h.itemView.requestFocus()
+                            } else {
+                                rv.postDelayed(
+                                    {
+                                        rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus()
+                                    },
+                                    64L,
+                                )
+                            }
+                        }
+                        true
+                    }
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    onCloseColumn()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    onStreamPicked(stream)
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
+        val name: TextView = itemView.findViewById(R.id.live_channel_name)
+    }
+}
 
 private class RecordsColumnPlaybackAdapter(
     private val listings: List<EpgListing>,
