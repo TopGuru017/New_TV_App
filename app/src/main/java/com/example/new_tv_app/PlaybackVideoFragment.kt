@@ -19,7 +19,6 @@ import androidx.core.content.IntentCompat
 import androidx.core.view.isVisible
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -41,19 +40,12 @@ import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.FavoriteVodStore
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
-import com.example.new_tv_app.iptv.LiveStream
-import com.example.new_tv_app.iptv.XtreamLiveApi
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
  * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
  * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
- * Live channel picker ([PlaybackActivity.LIVE_CATEGORY_ID] + [PlaybackActivity.LIVE_STREAM_ID]): DPAD up/down
- * on the video toggles the column; inside the column, up/down moves between cards (no-op at first/last row),
- * OK switches stream, right/back dismisses.
  * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down on video toggles a bottom
  * overlay (VOD-style card + footer); DPAD up/down on the thumbnail browses listings (▲/▼ flash cyan). At the first
  * listing, up does nothing; at the last, down does nothing. OK on the thumbnail applies the selection (if changed)
@@ -107,14 +99,6 @@ class PlaybackVideoFragment : Fragment() {
         resetRecordsArrowGlyphColorsAndDimming()
     }
 
-    private lateinit var liveChannelColumnContainer: View
-    private lateinit var liveChannelColumnRv: RecyclerView
-    private lateinit var liveChannelColumnAdapter: LivePlaybackChannelColumnAdapter
-    private var liveChannelColumnUserVisible: Boolean = false
-    private var liveChannelsLoadJob: Job? = null
-    private var liveCategoryId: String? = null
-    private var livePlaybackStreamId: String? = null
-    private lateinit var backCloseLiveChannelColumn: OnBackPressedCallback
     private lateinit var vodInfoBackCallback: OnBackPressedCallback
 
     private lateinit var playbackMovie: Movie
@@ -189,15 +173,6 @@ class PlaybackVideoFragment : Fragment() {
             }
         }
 
-        liveCategoryId =
-            requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_CATEGORY_ID)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-        livePlaybackStreamId =
-            requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_STREAM_ID)
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-
         currentPlaybackUrl = url
         attemptedPlaybackUrls.clear()
         attemptedPlaybackUrls.add(url)
@@ -227,15 +202,6 @@ class PlaybackVideoFragment : Fragment() {
             slots = trickSlots,
         )
         recordsInfoOverlay.isVisible = false
-
-        liveChannelColumnContainer = view.findViewById(R.id.playback_live_channels_container)
-        liveChannelColumnRv = view.findViewById(R.id.playback_live_channels_rv)
-        backCloseLiveChannelColumn = object : OnBackPressedCallback(false) {
-            override fun handleOnBackPressed() {
-                closeLiveChannelColumnAndResume()
-            }
-        }
-        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backCloseLiveChannelColumn)
 
         vodInfoOverlay = view.findViewById(R.id.playback_vod_info_overlay)
         vodInfoThumb = view.findViewById(R.id.playback_vod_info_thumb)
@@ -281,16 +247,6 @@ class PlaybackVideoFragment : Fragment() {
             }
         }
 
-        liveChannelColumnAdapter = LivePlaybackChannelColumnAdapter(
-            onStreamPicked = { stream -> switchLiveStreamFromColumn(stream) },
-            onCloseColumn = { closeLiveChannelColumnAndResume() },
-            videoFocusId = R.id.vlc_video_layout,
-        )
-        liveChannelColumnRv.layoutManager = LinearLayoutManager(requireContext())
-        liveChannelColumnRv.adapter = liveChannelColumnAdapter
-        liveChannelColumnRv.itemAnimator = null
-        liveChannelColumnContainer.isVisible = false
-
         trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
         trickRv.setHasFixedSize(true)
         trickRv.itemAnimator = null
@@ -322,10 +278,6 @@ class PlaybackVideoFragment : Fragment() {
                     }
                     if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty()) {
                         toggleRecordsColumn()
-                        return@setOnKeyListener true
-                    }
-                    if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl) && isLiveChannelPickerEligible()) {
-                        toggleLiveChannelColumn()
                         return@setOnKeyListener true
                     }
                     if (isVodPlaybackMode()) {
@@ -363,7 +315,7 @@ class PlaybackVideoFragment : Fragment() {
                     if (!seekable) return@setOnKeyListener false
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
                     if (!trickStripUserVisible || !trickRv.isVisible) {
-                        if (!openTrickStripForSeeking()) return@setOnKeyListener false
+                        if (!openTrickStripForSeeking(initialDelta = delta)) return@setOnKeyListener false
                         true
                     } else {
                         shiftSelectedTrick(delta)
@@ -375,9 +327,7 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
                     val p = mediaPlayer ?: return@setOnKeyListener false
-                    if (liveChannelColumnUserVisible) {
-                        closeLiveChannelColumnAndResume()
-                    } else if (recordsColumnUserVisible) {
+                    if (recordsColumnUserVisible) {
                         closeRecordsColumnAndResume()
                     } else if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
                         val slot = trickSlots[selectedTrickIndex.coerceIn(0, trickSlots.lastIndex)]
@@ -463,7 +413,6 @@ class PlaybackVideoFragment : Fragment() {
 
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/release")
-        liveChannelsLoadJob?.cancel()
         view?.removeCallbacks(progressTicker)
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
@@ -476,106 +425,6 @@ class PlaybackVideoFragment : Fragment() {
         httpDataSourceFactory = null
         videoLayout.player = null
         super.onDestroyView()
-    }
-
-    private fun isLiveChannelPickerEligible(): Boolean =
-        !liveCategoryId.isNullOrEmpty() && !livePlaybackStreamId.isNullOrEmpty()
-
-    private fun toggleLiveChannelColumn() {
-        if (liveChannelColumnUserVisible) {
-            closeLiveChannelColumnAndResume()
-        } else {
-            openLiveChannelColumn()
-        }
-    }
-
-    private fun openLiveChannelColumn() {
-        val catId = liveCategoryId ?: return
-        if (!IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) return
-        liveChannelColumnUserVisible = true
-        liveChannelColumnContainer.isVisible = true
-        backCloseLiveChannelColumn.isEnabled = true
-        mediaPlayer?.pause()
-        liveChannelsLoadJob?.cancel()
-        liveChannelsLoadJob = viewLifecycleOwner.lifecycleScope.launch {
-            val result = XtreamLiveApi.fetchLiveStreams(catId)
-            if (!isAdded || !liveChannelColumnUserVisible) return@launch
-            result.fold(
-                onSuccess = { streams ->
-                    liveChannelColumnAdapter.submit(streams)
-                    val sid = livePlaybackStreamId
-                    val idx = if (sid != null) {
-                        streams.indexOfFirst { it.streamId == sid }.let { i -> if (i >= 0) i else 0 }
-                    } else {
-                        0
-                    }
-                    if (streams.isNotEmpty()) {
-                        val safe = idx.coerceIn(0, streams.lastIndex)
-                        liveChannelColumnRv.scrollToPosition(safe)
-                        requestFocusLiveChannelPosition(safe)
-                    }
-                },
-                onFailure = {
-                    Toast.makeText(
-                        requireContext(),
-                        R.string.live_load_error,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                    closeLiveChannelColumnAndResume()
-                },
-            )
-        }
-    }
-
-    private fun requestFocusLiveChannelPosition(adapterPosition: Int) {
-        liveChannelColumnRv.post {
-            val h = liveChannelColumnRv.findViewHolderForAdapterPosition(adapterPosition)
-            if (h != null) {
-                h.itemView.requestFocus()
-            } else {
-                liveChannelColumnRv.postDelayed(
-                    {
-                        liveChannelColumnRv.findViewHolderForAdapterPosition(adapterPosition)
-                            ?.itemView
-                            ?.requestFocus()
-                    },
-                    64L,
-                )
-            }
-        }
-    }
-
-    private fun closeLiveChannelColumnAndResume() {
-        if (!liveChannelColumnUserVisible) return
-        liveChannelColumnUserVisible = false
-        liveChannelColumnContainer.isVisible = false
-        backCloseLiveChannelColumn.isEnabled = false
-        liveChannelsLoadJob?.cancel()
-        liveChannelsLoadJob = null
-        mediaPlayer?.play()
-        videoLayout.requestFocus()
-        updatePlaybackControlsUi()
-    }
-
-    private fun switchLiveStreamFromColumn(stream: LiveStream) {
-        livePlaybackStreamId = stream.streamId
-        posterUrl = sequenceOf(stream.iconUrl, posterUrl).firstOrNull { !it.isNullOrBlank() }
-        trickAdapter.setPosterUrl(posterUrl)
-        trickStripBuiltForLengthMs = -1L
-        trickStripUserVisible = false
-        trickRv.isVisible = false
-        liveChannelColumnUserVisible = false
-        liveChannelColumnContainer.isVisible = false
-        backCloseLiveChannelColumn.isEnabled = false
-        liveChannelsLoadJob?.cancel()
-        liveChannelsLoadJob = null
-        val player = mediaPlayer ?: return
-        runCatching { player.stop() }
-        val newUrl = IptvStreamUrls.liveStreamUrl(stream.streamId)
-        startPlayback(player, newUrl)
-        videoLayout.requestFocus()
-        player.play()
-        updatePlaybackControlsUi()
     }
 
     private fun startProgressTicker() {
@@ -790,9 +639,10 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     /**
-     * Dismisses records overlay, shows horizontal chapter strip, pauses playback. Returns false if not seekable.
+     * Dismisses records overlay, shows horizontal chapter strip, and moves chapter selection by [initialDelta]
+     * when requested (-1 left, +1 right). Returns false if stream is not seekable.
      */
-    private fun openTrickStripForSeeking(): Boolean {
+    private fun openTrickStripForSeeking(initialDelta: Int = 0): Boolean {
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
         }
@@ -800,14 +650,22 @@ class PlaybackVideoFragment : Fragment() {
         recordsInfoOverlay.isVisible = false
         val p = mediaPlayer ?: return false
         val len = mediaLengthMs(p)
-        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L && trickSlots.isNotEmpty()
+        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L
         if (!seekable) return false
+        if (trickSlots.isEmpty()) {
+            rebuildTrickStripIfNeeded()
+        }
+        if (trickSlots.isEmpty()) return false
         trickStripUserVisible = true
         trickRv.isVisible = true
         if (p.isPlaying) p.pause()
         syncSelectedTrickToCurrentTime()
-        centerSelectedTrickCard()
-        updatePlaybackControlsUi()
+        if (initialDelta != 0) {
+            shiftSelectedTrick(initialDelta)
+        } else {
+            centerSelectedTrickCard()
+            updatePlaybackControlsUi()
+        }
         videoLayout.requestFocus()
         return true
     }
@@ -840,7 +698,8 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_DPAD_LEFT,
                 KeyEvent.KEYCODE_DPAD_RIGHT,
                 -> {
-                    if (!openTrickStripForSeeking()) {
+                    val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
+                    if (!openTrickStripForSeeking(initialDelta = delta)) {
                         closeRecordsColumnAndResume()
                     }
                     true
@@ -1228,121 +1087,6 @@ private data class TrickSlot(
     /** Poster / EPG still for this segment; null uses placeholder in UI. */
     val thumbnailUrl: String?,
 )
-
-/** Vertical channel cards for live playback (DPAD up/down in column). */
-private class LivePlaybackChannelColumnAdapter(
-    private val onStreamPicked: (LiveStream) -> Unit,
-    private val onCloseColumn: () -> Unit,
-    private val videoFocusId: Int,
-) : RecyclerView.Adapter<LivePlaybackChannelColumnAdapter.VH>() {
-
-    private val items = mutableListOf<LiveStream>()
-
-    fun submit(list: List<LiveStream>) {
-        items.clear()
-        items.addAll(list)
-        notifyDataSetChanged()
-    }
-
-    override fun getItemCount(): Int = items.size
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val v = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_playback_live_channel, parent, false)
-        return VH(v)
-    }
-
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        val stream = items[position]
-        holder.name.text = stream.name
-        val iconUrl = stream.iconUrl
-        if (iconUrl.isNullOrBlank()) {
-            Glide.with(holder.icon).clear(holder.icon)
-            holder.icon.setImageDrawable(null)
-        } else {
-            Glide.with(holder.icon).load(iconUrl).fitCenter().into(holder.icon)
-        }
-        holder.itemView.nextFocusRightId = videoFocusId
-        holder.itemView.setOnClickListener {
-            holder.itemView.requestFocus()
-            onStreamPicked(stream)
-        }
-        holder.itemView.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            val pos = holder.bindingAdapterPosition
-            if (pos == RecyclerView.NO_POSITION) return@setOnKeyListener false
-            val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
-            val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    when {
-                        pos == 0 -> true
-                        lm.findViewByPosition(pos - 1) != null -> false
-                        else -> {
-                            val prev = pos - 1
-                            rv.scrollToPosition(prev)
-                            rv.post {
-                                val h = rv.findViewHolderForAdapterPosition(prev)
-                                if (h != null) {
-                                    h.itemView.requestFocus()
-                                } else {
-                                    rv.postDelayed(
-                                        {
-                                            rv.findViewHolderForAdapterPosition(prev)?.itemView?.requestFocus()
-                                        },
-                                        64L,
-                                    )
-                                }
-                            }
-                            true
-                        }
-                    }
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (pos >= itemCount - 1) {
-                        true
-                    } else if (lm.findViewByPosition(pos + 1) != null) {
-                        false
-                    } else {
-                        val next = pos + 1
-                        rv.scrollToPosition(next)
-                        rv.post {
-                            val h = rv.findViewHolderForAdapterPosition(next)
-                            if (h != null) {
-                                h.itemView.requestFocus()
-                            } else {
-                                rv.postDelayed(
-                                    {
-                                        rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus()
-                                    },
-                                    64L,
-                                )
-                            }
-                        }
-                        true
-                    }
-                }
-                KeyEvent.KEYCODE_BACK -> {
-                    onCloseColumn()
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER,
-                -> {
-                    onStreamPicked(stream)
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
-    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
-        val name: TextView = itemView.findViewById(R.id.live_channel_name)
-    }
-}
 
 private class TrickStripAdapter(
     initialPosterUrl: String?,
