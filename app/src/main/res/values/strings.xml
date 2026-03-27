@@ -48,6 +48,12 @@
     <string name="favorites_title">Favorites</string>
     <string name="favorites_edit">Edit</string>
     <string name="favorites_empty">Favorites list is empty :-(</string>
+    <string name="favorites_catalog_header">VOD</string>
+
+    <!-- VOD playback info overlay -->
+    <string name="playback_add_to_favorites">Add to Favorites</string>
+    <string name="playback_remove_from_favorites">Remove from Favorites</string>
+    <string name="playback_vod_meta">Genre: %1$s | %2$s | Time: %3$s</string>
 
     <!-- Search -->
     <string name="search_placeholder">הקלד מילות חיפוש…</string>

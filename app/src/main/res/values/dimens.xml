@@ -35,9 +35,12 @@
     <dimen name="tv_guide_program_spacing">10dp</dimen>
 
     <!-- Playback trick-play strip -->
-    <dimen name="playback_trick_card_width">132dp</dimen>
-    <dimen name="playback_trick_card_height">84dp</dimen>
+    <dimen name="playback_trick_card_width">210dp</dimen>
+    <dimen name="playback_trick_card_height">124dp</dimen>
+    <dimen name="playback_trick_card_corner_radius">10dp</dimen>
     <dimen name="playback_overlay_bottom_padding">16dp</dimen>
+    <dimen name="playback_vod_thumb_width">156dp</dimen>
+    <dimen name="playback_vod_thumb_height">90dp</dimen>
 
     <!-- Search -->
     <dimen name="search_field_min_height">52dp</dimen>

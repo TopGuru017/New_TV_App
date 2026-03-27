@@ -1,58 +1,97 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Same structure as last-watch home content: scroll + title row + muted section header + horizontal cards -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/content_background"
-    android:paddingStart="24dp"
-    android:paddingTop="14dp"
-    android:paddingEnd="24dp"
-    android:paddingBottom="14dp">
+    android:background="@color/content_background">
 
-    <LinearLayout
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/favorites_scroll"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal">
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:focusable="false"
+        android:focusableInTouchMode="false"
+        android:overScrollMode="never"
+        android:scrollbars="none">
 
-        <TextView
-            android:id="@+id/favorites_title"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/favorites_title"
-            android:textColor="@color/sidebar_text_primary"
-            android:textSize="20sp"
-            android:textStyle="normal"
-            tools:text="Favorites" />
+            android:orientation="vertical"
+            android:paddingStart="@dimen/last_watch_padding_start"
+            android:paddingTop="@dimen/last_watch_padding_top"
+            android:paddingEnd="@dimen/last_watch_padding_end"
+            android:paddingBottom="@dimen/last_watch_padding_bottom">
 
-        <TextView
-            android:id="@+id/favorites_edit"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/bg_search_clear_button"
-            android:clickable="true"
-            android:focusable="true"
-            android:paddingStart="16dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="16dp"
-            android:paddingBottom="8dp"
-            android:text="@string/favorites_edit"
-            android:textAllCaps="false"
-            android:textColor="@color/sidebar_text_primary"
-            android:textSize="13sp"
-            tools:text="Edit" />
-    </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/favorites_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:gravity="center"
-        android:text="@string/favorites_empty"
-        android:textColor="@color/sidebar_text_primary"
-        android:textSize="17sp"
-        android:textStyle="normal"
-        tools:text="Favorites list is empty :-(" />
+                <TextView
+                    android:id="@+id/favorites_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/favorites_title"
+                    android:textColor="@color/sidebar_text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    tools:text="Favorites" />
 
+                <TextView
+                    android:id="@+id/favorites_edit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_search_clear_button"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingEnd="18dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/favorites_edit"
+                    android:textAllCaps="false"
+                    android:textColor="@color/sidebar_text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    tools:text="Edit" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/favorites_section_header"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/last_watch_section_header_margin_top"
+                android:text="@string/favorites_catalog_header"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="14sp"
+                tools:text="VOD" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/favorites_rv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:clipToPadding="false"
+                android:nestedScrollingEnabled="false"
+                android:overScrollMode="never"
+                android:visibility="gone"
+                tools:listitem="@layout/item_last_watch_vod_big"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/favorites_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="40dp"
+                android:gravity="center"
+                android:text="@string/favorites_empty"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="15sp"
+                android:visibility="gone" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 </FrameLayout>

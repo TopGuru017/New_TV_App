@@ -14,6 +14,8 @@
     <color name="sidebar_row_focus_background">#2C2C2C</color>
     <color name="sidebar_live_chip_stroke">#B0B0B0</color>
     <color name="content_background">#000000</color>
+    <!-- Filled heart in playback VOD overlay when title is in favorites -->
+    <color name="playback_favorite_heart">#E91E63</color>
 
     <color name="profile_card_background">#1C1C1C</color>
     <color name="profile_label_cyan">#00ADEF</color>
