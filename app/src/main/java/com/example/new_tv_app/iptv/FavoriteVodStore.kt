@@ -53,6 +53,11 @@ object FavoriteVodStore {
         prefs.edit().putString(KEY_ENTRIES, toJsonArray(current).toString()).apply()
     }
 
+    fun removeMovie(context: Context, movie: Movie) {
+        val sid = streamIdFromMovieUrl(movie.videoUrl) ?: return
+        remove(context, sid)
+    }
+
     fun clear(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_ENTRIES).apply()
     }

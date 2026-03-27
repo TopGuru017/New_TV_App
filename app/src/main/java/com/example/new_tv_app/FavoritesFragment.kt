@@ -25,17 +25,50 @@ import com.example.new_tv_app.iptv.FavoriteVodStore
  */
 class FavoritesFragment : Fragment() {
 
-    private lateinit var rv: RecyclerView
+    private lateinit var seriesRv: RecyclerView
+    private lateinit var moviesRv: RecyclerView
     private lateinit var empty: TextView
-    private lateinit var sectionHeader: TextView
+    private lateinit var sectionHeaderSeries: TextView
+    private lateinit var sectionHeaderMovies: TextView
+    private lateinit var editBtn: TextView
+    private lateinit var clearAllBtn: TextView
+    private var isEditMode = false
 
-    private val adapter = FavoriteVodCardAdapter { movie ->
-        startActivity(
-            Intent(requireContext(), PlaybackActivity::class.java).apply {
-                putExtra(DetailsActivity.MOVIE, movie)
-            },
-        )
-    }
+    private val seriesAdapter = FavoriteVodCardAdapter(
+        onOpen = { movie ->
+            startActivity(
+                Intent(requireContext(), PlaybackActivity::class.java).apply {
+                    putExtra(DetailsActivity.MOVIE, movie)
+                },
+            )
+        },
+        onRemove = { movie ->
+            FavoriteVodStore.removeMovie(requireContext(), movie)
+            refreshList()
+        },
+        onDpadUp = { editBtn.requestFocus() },
+        onDpadDown = {
+            val count = moviesRv.adapter?.itemCount ?: 0
+            if (count > 0) focusFirstItem(moviesRv)
+        },
+    )
+    private val moviesAdapter = FavoriteVodCardAdapter(
+        onOpen = { movie ->
+            startActivity(
+                Intent(requireContext(), PlaybackActivity::class.java).apply {
+                    putExtra(DetailsActivity.MOVIE, movie)
+                },
+            )
+        },
+        onRemove = { movie ->
+            FavoriteVodStore.removeMovie(requireContext(), movie)
+            refreshList()
+        },
+        onDpadUp = {
+            val count = seriesRv.adapter?.itemCount ?: 0
+            if (count > 0) focusFirstItem(seriesRv) else editBtn.requestFocus()
+        },
+    )
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -45,20 +78,33 @@ class FavoritesFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        rv = view.findViewById(R.id.favorites_rv)
+        seriesRv = view.findViewById(R.id.favorites_series_rv)
+        moviesRv = view.findViewById(R.id.favorites_movies_rv)
         empty = view.findViewById(R.id.favorites_empty)
-        sectionHeader = view.findViewById(R.id.favorites_section_header)
+        sectionHeaderSeries = view.findViewById(R.id.favorites_section_header_series)
+        sectionHeaderMovies = view.findViewById(R.id.favorites_section_header_movies)
+        editBtn = view.findViewById(R.id.favorites_edit)
+        clearAllBtn = view.findViewById(R.id.favorites_clear_all)
 
-        rv.layoutManager =
+        seriesRv.layoutManager =
+            LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        moviesRv.layoutManager =
             LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
         val gap = resources.getDimensionPixelSize(R.dimen.last_watch_row_item_gap)
-        rv.addItemDecoration(FavoritesHorizontalSpacingDecoration(gap))
-        rv.adapter = adapter
+        seriesRv.addItemDecoration(FavoritesHorizontalSpacingDecoration(gap))
+        moviesRv.addItemDecoration(FavoritesHorizontalSpacingDecoration(gap))
+        seriesRv.adapter = seriesAdapter
+        moviesRv.adapter = moviesAdapter
 
-        view.findViewById<TextView>(R.id.favorites_edit).setOnClickListener {
+        editBtn.setOnClickListener {
+            isEditMode = !isEditMode
+            applyEditModeUi()
+        }
+        clearAllBtn.setOnClickListener {
             FavoriteVodStore.clear(requireContext())
             refreshList()
         }
+        applyEditModeUi()
         refreshList()
     }
 
@@ -70,16 +116,58 @@ class FavoritesFragment : Fragment() {
     private fun refreshList() {
         if (!isAdded) return
         val list = FavoriteVodStore.readAll(requireContext())
-        adapter.submit(list)
-        val has = list.isNotEmpty()
-        rv.isVisible = has
-        sectionHeader.isVisible = has
+        val (series, movies) = splitFavoritesByType(list)
+        seriesAdapter.submit(series)
+        moviesAdapter.submit(movies)
+
+        val hasSeries = series.isNotEmpty()
+        val hasMovies = movies.isNotEmpty()
+        val has = hasSeries || hasMovies
+        seriesRv.isVisible = hasSeries
+        moviesRv.isVisible = hasMovies
+        sectionHeaderSeries.isVisible = hasSeries
+        sectionHeaderMovies.isVisible = hasMovies
         empty.isVisible = !has
         if (has) {
-            rv.post {
-                rv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
+            when {
+                hasSeries -> focusFirstItem(seriesRv)
+                hasMovies -> focusFirstItem(moviesRv)
             }
         }
+    }
+
+    private fun applyEditModeUi() {
+        editBtn.setText(if (isEditMode) R.string.favorites_close_edit else R.string.favorites_edit)
+        clearAllBtn.isVisible = isEditMode
+        seriesAdapter.setEditMode(isEditMode)
+        moviesAdapter.setEditMode(isEditMode)
+    }
+
+    private fun focusFirstItem(rv: RecyclerView, attemptsRemaining: Int = 28) {
+        rv.scrollToPosition(0)
+        rv.post {
+            if (!rv.isAttachedToWindow) return@post
+            val vh = rv.findViewHolderForAdapterPosition(0)
+            if (vh != null) {
+                vh.itemView.requestFocus()
+            } else if (attemptsRemaining > 0) {
+                focusFirstItem(rv, attemptsRemaining - 1)
+            }
+        }
+    }
+
+    private fun splitFavoritesByType(all: List<Movie>): Pair<List<Movie>, List<Movie>> {
+        val series = mutableListOf<Movie>()
+        val movies = mutableListOf<Movie>()
+        for (m in all) {
+            val p = m.videoUrl.orEmpty()
+            if (p.contains("/series/", ignoreCase = true)) {
+                series.add(m)
+            } else {
+                movies.add(m)
+            }
+        }
+        return series to movies
     }
 }
 
@@ -102,13 +190,23 @@ private class FavoritesHorizontalSpacingDecoration(
 
 private class FavoriteVodCardAdapter(
     private val onOpen: (Movie) -> Unit,
+    private val onRemove: (Movie) -> Unit,
+    private val onDpadUp: () -> Unit = {},
+    private val onDpadDown: () -> Unit = {},
 ) : RecyclerView.Adapter<FavoriteVodCardAdapter.VH>() {
 
     private val items = mutableListOf<Movie>()
+    private var editMode = false
 
     fun submit(list: List<Movie>) {
         items.clear()
         items.addAll(list)
+        notifyDataSetChanged()
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        if (editMode == enabled) return
+        editMode = enabled
         notifyDataSetChanged()
     }
 
@@ -127,7 +225,10 @@ private class FavoriteVodCardAdapter(
         val img = m.cardImageUrl?.takeIf { it.isNotBlank() }
             ?: m.backgroundImageUrl?.takeIf { it.isNotBlank() }
         loadFavoriteCardImage(holder.bg, img)
-        holder.itemView.setOnClickListener { onOpen(m) }
+        holder.removeBadge.isVisible = editMode
+        holder.itemView.setOnClickListener {
+            if (editMode) onRemove(m) else onOpen(m)
+        }
         holder.itemView.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             val parentRv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
@@ -152,6 +253,14 @@ private class FavoriteVodCardAdapter(
                     }
                     true
                 }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    onDpadUp()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    onDpadDown()
+                    true
+                }
                 else -> false
             }
         }
@@ -161,6 +270,7 @@ private class FavoriteVodCardAdapter(
         val bg: ImageView = itemView.findViewById(R.id.last_watch_vod_bg)
         val title: TextView = itemView.findViewById(R.id.last_watch_vod_title)
         val subtitle: TextView = itemView.findViewById(R.id.last_watch_vod_subtitle)
+        val removeBadge: View = itemView.findViewById(R.id.last_watch_remove_badge)
     }
 }
 

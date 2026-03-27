@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -49,6 +50,7 @@ class HomeContentFragment : Fragment() {
     }
 
     private lateinit var editBtn: TextView
+    private lateinit var clearAllBtn: TextView
     private lateinit var empty: TextView
     private lateinit var recordsRv: RecyclerView
     private lateinit var seriesRv: RecyclerView
@@ -57,6 +59,7 @@ class HomeContentFragment : Fragment() {
     private lateinit var recordsAdapter: LastWatchRecordsAdapter
     private lateinit var vodSeriesAdapter: LastWatchVodAdapter
     private lateinit var vodMoviesAdapter: LastWatchVodAdapter
+    private var isEditMode = false
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -68,6 +71,7 @@ class HomeContentFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         editBtn = view.findViewById(R.id.home_last_watch_edit)
+        clearAllBtn = view.findViewById(R.id.home_last_watch_clear_all)
         empty = view.findViewById(R.id.home_last_watch_empty)
 
         recordsRv = view.findViewById(R.id.home_last_watch_records_rv)
@@ -89,6 +93,10 @@ class HomeContentFragment : Fragment() {
 
         recordsAdapter = LastWatchRecordsAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
+            onRemove = { entry ->
+                LastWatchStore.removeEntry(requireContext(), entry)
+                loadLastWatch()
+            },
             onDpadUp = {
                 editBtn.requestFocus()
             },
@@ -104,6 +112,10 @@ class HomeContentFragment : Fragment() {
         )
         vodSeriesAdapter = LastWatchVodAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
+            onRemove = { entry ->
+                LastWatchStore.removeEntry(requireContext(), entry)
+                loadLastWatch()
+            },
             onDpadUp = {
                 when {
                     recordsRv.adapter?.itemCount ?: 0 > 0 -> focusFirstItem(recordsRv)
@@ -117,6 +129,10 @@ class HomeContentFragment : Fragment() {
         )
         vodMoviesAdapter = LastWatchVodAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
+            onRemove = { entry ->
+                LastWatchStore.removeEntry(requireContext(), entry)
+                loadLastWatch()
+            },
             onDpadUp = {
                 when {
                     seriesRv.adapter?.itemCount ?: 0 > 0 -> focusFirstItem(seriesRv)
@@ -131,9 +147,14 @@ class HomeContentFragment : Fragment() {
         moviesRv.adapter = vodMoviesAdapter
 
         editBtn.setOnClickListener {
+            isEditMode = !isEditMode
+            applyEditModeUi()
+        }
+        clearAllBtn.setOnClickListener {
             LastWatchStore.clear(requireContext())
             loadLastWatch()
         }
+        applyEditModeUi()
         loadLastWatch()
     }
 
@@ -162,6 +183,14 @@ class HomeContentFragment : Fragment() {
             else -> null
         }
         targetRv?.let { focusFirstItem(it) }
+    }
+
+    private fun applyEditModeUi() {
+        editBtn.setText(if (isEditMode) R.string.last_watch_close_edit else R.string.last_watch_edit)
+        clearAllBtn.isVisible = isEditMode
+        recordsAdapter.setEditMode(isEditMode)
+        vodSeriesAdapter.setEditMode(isEditMode)
+        vodMoviesAdapter.setEditMode(isEditMode)
     }
 }
 
@@ -202,15 +231,23 @@ private class LastWatchHorizontalSpacingDecoration(
 
 private class LastWatchRecordsAdapter(
     private val onOpen: (LastWatchEntry) -> Unit,
+    private val onRemove: (LastWatchEntry) -> Unit,
     private val onDpadUp: () -> Unit,
     private val onDpadDown: () -> Unit,
 ) : RecyclerView.Adapter<LastWatchRecordsAdapter.VH>() {
 
     private val items = mutableListOf<LastWatchEntry>()
+    private var editMode = false
 
     fun submit(list: List<LastWatchEntry>) {
         items.clear()
         items.addAll(list)
+        notifyDataSetChanged()
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        if (editMode == enabled) return
+        editMode = enabled
         notifyDataSetChanged()
     }
 
@@ -239,8 +276,11 @@ private class LastWatchRecordsAdapter(
         holder.bottomTime.text = if (e.playedUnixSeconds > 0) {
             IptvTimeUtils.formatDateIsrael(e.playedUnixSeconds, "dd/MM - EEEE")
         } else ""
+        holder.removeBadge.isVisible = editMode
 
-        holder.root.setOnClickListener { onOpen(e) }
+        holder.root.setOnClickListener {
+            if (editMode) onRemove(e) else onOpen(e)
+        }
         holder.root.setOnKeyListener { _, keyCode, event ->
             if (event.action != android.view.KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             val rv = holder.itemView.parent as? RecyclerView
@@ -286,20 +326,29 @@ private class LastWatchRecordsAdapter(
         val time: TextView = itemView.findViewById(R.id.last_watch_record_time)
         val bottomTitle: TextView = itemView.findViewById(R.id.last_watch_record_bottom_title)
         val bottomTime: TextView = itemView.findViewById(R.id.last_watch_record_bottom_time)
+        val removeBadge: View = itemView.findViewById(R.id.last_watch_remove_badge)
     }
 }
 
 private class LastWatchVodAdapter(
     private val onOpen: (LastWatchEntry) -> Unit,
+    private val onRemove: (LastWatchEntry) -> Unit,
     private val onDpadUp: () -> Unit = {},
     private val onDpadDown: () -> Unit = {},
 ) : RecyclerView.Adapter<LastWatchVodAdapter.VH>() {
 
     private val items = mutableListOf<LastWatchEntry>()
+    private var editMode = false
 
     fun submit(list: List<LastWatchEntry>) {
         items.clear()
         items.addAll(list)
+        notifyDataSetChanged()
+    }
+
+    fun setEditMode(enabled: Boolean) {
+        if (editMode == enabled) return
+        editMode = enabled
         notifyDataSetChanged()
     }
 
@@ -322,8 +371,11 @@ private class LastWatchVodAdapter(
 
         holder.title.text = e.movie.title.orEmpty()
         holder.subtitle.text = e.movie.description.orEmpty()
+        holder.removeBadge.isVisible = editMode
 
-        holder.root.setOnClickListener { onOpen(e) }
+        holder.root.setOnClickListener {
+            if (editMode) onRemove(e) else onOpen(e)
+        }
         holder.root.setOnKeyListener { _, keyCode, event ->
             if (event.action != android.view.KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             val rv = holder.root.parent as? RecyclerView ?: return@setOnKeyListener false
@@ -366,5 +418,6 @@ private class LastWatchVodAdapter(
         val bg: ImageView = itemView.findViewById(R.id.last_watch_vod_bg)
         val title: TextView = itemView.findViewById(R.id.last_watch_vod_title)
         val subtitle: TextView = itemView.findViewById(R.id.last_watch_vod_subtitle)
+        val removeBadge: View = itemView.findViewById(R.id.last_watch_remove_badge)
     }
 }

@@ -71,6 +71,25 @@
             android:textSize="12sp"
             tools:text="- 01:40" />
 
+        <FrameLayout
+            android:id="@+id/last_watch_remove_badge"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_last_watch_remove_circle"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:text="×"
+                android:textColor="@android:color/white"
+                android:textSize="22sp"
+                android:textStyle="bold" />
+        </FrameLayout>
+
     </FrameLayout>
 
     <TextView

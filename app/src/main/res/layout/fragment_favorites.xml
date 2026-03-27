@@ -42,10 +42,31 @@
                     tools:text="Favorites" />
 
                 <TextView
+                    android:id="@+id/favorites_clear_all"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_edit_mode_action_button"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:paddingStart="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingEnd="18dp"
+                    android:paddingBottom="10dp"
+                    android:text="@string/favorites_clear_all"
+                    android:textAllCaps="false"
+                    android:textColor="@color/edit_mode_action_text"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:visibility="gone"
+                    tools:text="Clear All"
+                    tools:visibility="visible" />
+
+                <TextView
                     android:id="@+id/favorites_edit"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:background="@drawable/bg_search_clear_button"
+                    android:background="@drawable/bg_edit_mode_action_button"
                     android:clickable="true"
                     android:focusable="true"
                     android:paddingStart="18dp"
@@ -54,24 +75,46 @@
                     android:paddingBottom="10dp"
                     android:text="@string/favorites_edit"
                     android:textAllCaps="false"
-                    android:textColor="@color/sidebar_text_primary"
+                    android:textColor="@color/edit_mode_action_text"
                     android:textSize="13sp"
                     android:textStyle="bold"
                     tools:text="Edit" />
             </LinearLayout>
 
             <TextView
-                android:id="@+id/favorites_section_header"
+                android:id="@+id/favorites_section_header_series"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/last_watch_section_header_margin_top"
-                android:text="@string/favorites_catalog_header"
+                android:text="@string/last_watch_header_vod_series"
                 android:textColor="@color/sidebar_text_muted"
                 android:textSize="14sp"
-                tools:text="VOD" />
+                tools:text="VOD - SERIES" />
 
             <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/favorites_rv"
+                android:id="@+id/favorites_series_rv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:clipToPadding="false"
+                android:nestedScrollingEnabled="false"
+                android:overScrollMode="never"
+                android:visibility="gone"
+                tools:listitem="@layout/item_last_watch_vod_big"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/favorites_section_header_movies"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/last_watch_section_header_margin_top"
+                android:text="@string/last_watch_header_vod_movies"
+                android:textColor="@color/sidebar_text_muted"
+                android:textSize="14sp"
+                tools:text="VOD - MOVIES" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/favorites_movies_rv"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"

@@ -114,6 +114,14 @@ object LastWatchStore {
             .apply()
     }
 
+    fun removeEntry(context: Context, entry: LastWatchEntry) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val key = canonicalDedupeKey(entry)
+        val current = loadEntries(context, persistIfDeduped = false)
+        current.removeAll { canonicalDedupeKey(it) == key }
+        prefs.edit().putString(KEY_ENTRIES, toJsonArray(current).toString()).apply()
+    }
+
     /**
      * Parse, de-dupe (newest first wins), optionally persist if we dropped legacy duplicates.
      */
