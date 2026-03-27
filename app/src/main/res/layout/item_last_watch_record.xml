@@ -4,7 +4,6 @@
     android:layout_width="@dimen/last_watch_record_card_width"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingEnd="4dp"
     android:paddingBottom="12dp">
 
     <FrameLayout
@@ -13,6 +12,7 @@
         android:layout_height="@dimen/last_watch_record_card_height"
         android:background="@drawable/bg_last_watch_record_card"
         android:clickable="true"
+        android:clipChildren="true"
         android:focusable="true">
 
         <ImageView
@@ -26,7 +26,7 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="#55000000" />
+            android:background="@drawable/bg_last_watch_record_overlay" />
 
         <TextView
             android:id="@+id/last_watch_record_tag"

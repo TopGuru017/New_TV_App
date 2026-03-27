@@ -1,5 +1,6 @@
 package com.example.new_tv_app
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.content.Intent
 import android.view.LayoutInflater
@@ -11,6 +12,10 @@ import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
+import com.bumptech.glide.load.MultiTransformation
+import com.bumptech.glide.load.resource.bitmap.CenterCrop
+import com.bumptech.glide.load.resource.bitmap.RoundedCorners
+import com.bumptech.glide.request.RequestOptions
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.LastWatchStore.LastWatchEntry
@@ -76,8 +81,17 @@ class HomeContentFragment : Fragment() {
         moviesRv.layoutManager =
             LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
 
+        val rowGap = resources.getDimensionPixelSize(R.dimen.last_watch_row_item_gap)
+        val rowSpacing = LastWatchHorizontalSpacingDecoration(rowGap)
+        recordsRv.addItemDecoration(rowSpacing)
+        seriesRv.addItemDecoration(rowSpacing)
+        moviesRv.addItemDecoration(rowSpacing)
+
         recordsAdapter = LastWatchRecordsAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
+            onDpadUp = {
+                editBtn.requestFocus()
+            },
             onDpadDown = {
                 val seriesCount = seriesRv.adapter?.itemCount ?: 0
                 if (seriesCount > 0) {
@@ -91,8 +105,10 @@ class HomeContentFragment : Fragment() {
         vodSeriesAdapter = LastWatchVodAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
             onDpadUp = {
-                val recordsCount = recordsRv.adapter?.itemCount ?: 0
-                if (recordsCount > 0) focusFirstItem(recordsRv)
+                when {
+                    recordsRv.adapter?.itemCount ?: 0 > 0 -> focusFirstItem(recordsRv)
+                    else -> editBtn.requestFocus()
+                }
             },
             onDpadDown = {
                 val moviesCount = moviesRv.adapter?.itemCount ?: 0
@@ -102,8 +118,11 @@ class HomeContentFragment : Fragment() {
         vodMoviesAdapter = LastWatchVodAdapter(
             onOpen = { entry -> openMovie(entry.movie) },
             onDpadUp = {
-                val seriesCount = seriesRv.adapter?.itemCount ?: 0
-                if (seriesCount > 0) focusFirstItem(seriesRv)
+                when {
+                    seriesRv.adapter?.itemCount ?: 0 > 0 -> focusFirstItem(seriesRv)
+                    recordsRv.adapter?.itemCount ?: 0 > 0 -> focusFirstItem(recordsRv)
+                    else -> editBtn.requestFocus()
+                }
             },
         )
 
@@ -146,8 +165,44 @@ class HomeContentFragment : Fragment() {
     }
 }
 
+/**
+ * Loads poster art clipped to the same corner radius as [R.dimen.last_watch_card_corner_radius]
+ * so images do not show square corners outside the rounded cyan focus ring.
+ */
+private fun loadLastWatchCardImage(target: ImageView, url: String?) {
+    val radiusPx = target.resources.getDimensionPixelSize(R.dimen.last_watch_card_corner_radius)
+    val opts = RequestOptions().transform(
+        MultiTransformation(CenterCrop(), RoundedCorners(radiusPx)),
+    )
+    Glide.with(target).clear(target)
+    if (url.isNullOrBlank()) {
+        target.setImageDrawable(null)
+        return
+    }
+    Glide.with(target).load(url).apply(opts).into(target)
+}
+
+/** Horizontal gap between cards in last-watch rows (does not add trailing margin after last item). */
+private class LastWatchHorizontalSpacingDecoration(
+    private val gapPx: Int,
+) : RecyclerView.ItemDecoration() {
+    override fun getItemOffsets(
+        outRect: Rect,
+        view: View,
+        parent: RecyclerView,
+        state: RecyclerView.State,
+    ) {
+        val pos = parent.getChildAdapterPosition(view)
+        if (pos == RecyclerView.NO_POSITION) return
+        if (pos > 0) {
+            outRect.left = gapPx
+        }
+    }
+}
+
 private class LastWatchRecordsAdapter(
     private val onOpen: (LastWatchEntry) -> Unit,
+    private val onDpadUp: () -> Unit,
     private val onDpadDown: () -> Unit,
 ) : RecyclerView.Adapter<LastWatchRecordsAdapter.VH>() {
 
@@ -178,10 +233,7 @@ private class LastWatchRecordsAdapter(
             ?: e.movie.cardImageUrl?.takeIf { it.isNotBlank() }
             ?: e.movie.backgroundImageUrl?.takeIf { it.isNotBlank() }
 
-        Glide.with(holder.bg).clear(holder.bg)
-        if (!img.isNullOrBlank()) {
-            Glide.with(holder.bg).load(img).centerCrop().into(holder.bg)
-        }
+        loadLastWatchCardImage(holder.bg, img)
 
         holder.bottomTitle.text = e.movie.title.orEmpty().ifBlank { e.channelName.orEmpty() }
         holder.bottomTime.text = if (e.playedUnixSeconds > 0) {
@@ -215,6 +267,10 @@ private class LastWatchRecordsAdapter(
                 }
                 android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
                     onDpadDown()
+                    true
+                }
+                android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                    onDpadUp()
                     true
                 }
                 else -> false
@@ -262,10 +318,7 @@ private class LastWatchVodAdapter(
             ?: e.movie.cardImageUrl?.takeIf { it.isNotBlank() }
             ?: e.movie.backgroundImageUrl?.takeIf { it.isNotBlank() }
 
-        Glide.with(holder.bg).clear(holder.bg)
-        if (!img.isNullOrBlank()) {
-            Glide.with(holder.bg).load(img).centerCrop().into(holder.bg)
-        }
+        loadLastWatchCardImage(holder.bg, img)
 
         holder.title.text = e.movie.title.orEmpty()
         holder.subtitle.text = e.movie.description.orEmpty()

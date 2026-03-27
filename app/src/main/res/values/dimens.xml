@@ -63,4 +63,7 @@
     <dimen name="last_watch_vod_big_width">@dimen/last_watch_category_card_width</dimen>
     <dimen name="last_watch_vod_big_height">@dimen/last_watch_record_card_height</dimen>
     <dimen name="last_watch_section_header_margin_top">18dp</dimen>
+    <dimen name="last_watch_row_item_gap">12dp</dimen>
+    <!-- Shared corner radius for last-watch cards, backgrounds, focus ring, and Glide rounding -->
+    <dimen name="last_watch_card_corner_radius">10dp</dimen>
 </resources>
