@@ -22,6 +22,41 @@ object IptvStreamUrls {
         return path.split('/').any { it.equals("live", ignoreCase = true) }
     }
 
+    /** True for Xtream-style catch-up / timeshift URLs (`/timeshift/…`). */
+    fun isTimeshiftUrl(url: String): Boolean {
+        val path = Uri.parse(url.trim()).path ?: return false
+        return path.split('/').any { it.equals("timeshift", ignoreCase = true) }
+    }
+
+    /**
+     * Extracts the Xtream stream ID from a timeshift URL.
+     *
+     * URL format: `base/timeshift/user/pass/durationMin/startFmt/streamId.m3u8`
+     * The stream ID is the last path segment, stripped of its extension.
+     */
+    fun streamIdFromTimeshiftUrl(url: String): String? {
+        if (!isTimeshiftUrl(url)) return null
+        val path = Uri.parse(url.trim()).path ?: return null
+        val lastSegment = path.trimEnd('/').substringAfterLast('/').ifBlank { return null }
+        val dot = lastSegment.lastIndexOf('.')
+        return if (dot > 0) lastSegment.substring(0, dot) else lastSegment
+    }
+
+    /**
+     * Returns the recording start time (Unix seconds, Israel tz) parsed from the timeshift URL
+     * path segment `startFmt` (`yyyy-MM-dd:HH-mm`). Returns null on parse failure.
+     */
+    fun startTimeSecondsFromTimeshiftUrl(url: String): Long? {
+        if (!isTimeshiftUrl(url)) return null
+        val path = Uri.parse(url.trim()).path ?: return null
+        val segments = path.split('/').filter { it.isNotEmpty() }
+        val timeshiftIdx = segments.indexOfFirst { it.equals("timeshift", ignoreCase = true) }
+        if (timeshiftIdx < 0) return null
+        // path after /timeshift: [user, pass, durationMin, startFmt, id.m3u8]
+        val startFmt = segments.getOrNull(timeshiftIdx + 4) ?: return null
+        return IptvTimeUtils.parseTimeshiftStartIsrael(startFmt)
+    }
+
     fun vodMovieUrl(streamId: String, containerExtension: String): String {
         val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")

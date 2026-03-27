@@ -35,6 +35,18 @@ object IptvTimeUtils {
         return sdf.format(Date(unixSeconds * 1000L))
     }
 
+    /**
+     * Parses a timeshift start segment (`2026-03-22:04-20`) back to Unix seconds.
+     * Returns null if the segment cannot be parsed.
+     */
+    fun parseTimeshiftStartIsrael(startFmt: String): Long? {
+        return runCatching {
+            val sdf = SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US)
+            sdf.timeZone = ISRAEL_TZ
+            sdf.parse(startFmt)?.time?.div(1000L)
+        }.getOrNull()
+    }
+
     fun startOfDayIsraelSeconds(unixSeconds: Long): Long {
         val cal = Calendar.getInstance(ISRAEL_TZ)
         cal.timeInMillis = unixSeconds * 1000L

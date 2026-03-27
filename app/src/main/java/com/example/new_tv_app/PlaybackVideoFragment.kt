@@ -36,11 +36,15 @@ import com.bumptech.glide.load.MultiTransformation
 import com.bumptech.glide.load.resource.bitmap.CenterCrop
 import com.bumptech.glide.load.resource.bitmap.RoundedCorners
 import com.bumptech.glide.request.RequestOptions
+import androidx.lifecycle.lifecycleScope
 import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.FavoriteVodStore
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.XtreamLiveApi
 import java.util.Locale
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 /**
  * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
@@ -93,6 +97,8 @@ class PlaybackVideoFragment : Fragment() {
     private var currentArchiveListingId: Long = 0L
     /** Index in [recordsDayListings] for the panel (may differ from playback until user confirms). */
     private var recordsColumnListingIndex: Int = 0
+    /** Background job that loads EPG listings when entering basic timeshift mode (no intent extras). */
+    private var recordsEpgLoadJob: Job? = null
 
     private val recordsArrowColorResetRunnable = Runnable {
         if (!isAdded || !recordsColumnUserVisible) return@Runnable
@@ -276,8 +282,12 @@ class PlaybackVideoFragment : Fragment() {
                         videoLayout.requestFocus()
                         return@setOnKeyListener true
                     }
-                    if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty()) {
-                        toggleRecordsColumn()
+                    if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty() ||
+                        IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
+                    ) {
+                        if (!recordsColumnUserVisible) {
+                            openRecordsColumn()
+                        }
                         return@setOnKeyListener true
                     }
                     if (isVodPlaybackMode()) {
@@ -414,6 +424,7 @@ class PlaybackVideoFragment : Fragment() {
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/release")
         view?.removeCallbacks(progressTicker)
+        recordsEpgLoadJob?.cancel()
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
         }
@@ -493,7 +504,9 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun openRecordsColumn() {
-        if (recordsDayListings.isEmpty() || recordsArchiveStreamId.isNullOrEmpty()) return
+        if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) &&
+            (recordsDayListings.isEmpty() || recordsArchiveStreamId.isNullOrEmpty())
+        ) return
         trickStripUserVisible = false
         trickRv.isVisible = false
         recordsColumnUserVisible = true
@@ -501,10 +514,9 @@ class PlaybackVideoFragment : Fragment() {
         syncRecordsColumnListingIndexWithPlayback()
         resetRecordsArrowGlyphColorsAndDimming()
         bindRecordsColumnPanelUi()
+        loadRecordsEpgIfNeeded()
         mediaPlayer?.pause()
-        recordsColumnThumb.post {
-            if (recordsColumnUserVisible && isAdded) recordsColumnThumb.requestFocus()
-        }
+        recordsColumnThumb.requestFocus()
         updatePlaybackControlsUi()
     }
 
@@ -513,18 +525,78 @@ class PlaybackVideoFragment : Fragment() {
             .let { if (it >= 0) it else 0 }
     }
 
-    private fun bindRecordsColumnPanelUi() {
-        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
-        val timeLabel = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
-        recordsInfoTitle.text = listing.title
-        recordsInfoDescription.text = listing.description.trim().ifBlank {
-            getString(R.string.tv_guide_no_description)
+    /**
+     * When the overlay is opened without day listings (e.g. via Last Watch → PlaybackActivity),
+     * extract the stream ID from the timeshift URL, fetch the EPG for that day, and refresh the UI
+     * so up/down navigation becomes available.
+     */
+    private fun loadRecordsEpgIfNeeded() {
+        if (recordsDayListings.isNotEmpty()) return
+        val sid = IptvStreamUrls.streamIdFromTimeshiftUrl(currentPlaybackUrl) ?: return
+        recordsArchiveStreamId = sid
+        recordsEpgLoadJob?.cancel()
+        recordsEpgLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = XtreamLiveApi.fetchArchiveEpgTable(sid)
+            result.onSuccess { allListings ->
+                if (!isAdded || !recordsColumnUserVisible) return@onSuccess
+                // Determine the recording's day from the timeshift URL start segment
+                val recordingStartSec = IptvStreamUrls.startTimeSecondsFromTimeshiftUrl(currentPlaybackUrl)
+                    ?: IptvTimeUtils.nowIsraelSeconds()
+                val dayStart = IptvTimeUtils.startOfDayIsraelSeconds(recordingStartSec)
+                val dayEnd = IptvTimeUtils.endOfDayIsraelSeconds(dayStart)
+                val dayListings = allListings
+                    .filter { it.startUnix >= dayStart && it.startUnix < dayEnd }
+                    .sortedBy { it.startUnix }
+                if (dayListings.isEmpty()) return@onSuccess
+                recordsDayListings.clear()
+                recordsDayListings.addAll(dayListings)
+                // Try to pin currentArchiveListingId to the listing that covers the start time
+                val anchor = allListings.find {
+                    recordingStartSec >= it.startUnix && recordingStartSec < it.endUnix
+                }
+                if (anchor != null) {
+                    currentArchiveListingId = anchor.startUnix xor anchor.endUnix
+                }
+                syncRecordsColumnListingIndexWithPlayback()
+                if (recordsColumnUserVisible && isAdded) {
+                    resetRecordsArrowGlyphColorsAndDimming()
+                    bindRecordsColumnPanelUi()
+                }
+            }
         }
-        recordsInfoMeta.text = formatRecordsMetaLine(listing)
-        recordsColumnThumb.contentDescription = listing.title.ifBlank { listing.description.ifBlank { timeLabel } }
+    }
 
-        val img = listing.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
-        if (img.isNullOrEmpty()) {
+    private fun bindRecordsColumnPanelUi() {
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex)
+
+        val title: String
+        val description: String
+        val metaText: String
+        val imgUrl: String?
+        val thumbDesc: String
+
+        if (listing != null) {
+            val timeLabel = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+            title = listing.title
+            description = listing.description.trim().ifBlank { getString(R.string.tv_guide_no_description) }
+            metaText = formatRecordsMetaLine(listing)
+            imgUrl = listing.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+            thumbDesc = listing.title.ifBlank { listing.description.ifBlank { timeLabel } }
+        } else {
+            title = playbackMovie.title.orEmpty()
+            description = playbackMovie.description.orEmpty()
+            metaText = ""
+            imgUrl = sequenceOf(playbackMovie.cardImageUrl, playbackMovie.backgroundImageUrl)
+                .firstOrNull { !it.isNullOrBlank() }
+            thumbDesc = title
+        }
+
+        recordsInfoTitle.text = title
+        recordsInfoDescription.text = description
+        recordsInfoMeta.text = metaText
+        recordsColumnThumb.contentDescription = thumbDesc
+
+        if (imgUrl.isNullOrEmpty()) {
             Glide.with(recordsColumnThumb).clear(recordsColumnThumb)
             recordsColumnThumb.scaleType = ScaleType.CENTER_INSIDE
             recordsColumnThumb.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
@@ -536,7 +608,7 @@ class PlaybackVideoFragment : Fragment() {
             recordsColumnThumb.clearColorFilter()
             recordsColumnThumb.scaleType = ScaleType.CENTER_CROP
             Glide.with(recordsColumnThumb)
-                .load(img)
+                .load(imgUrl)
                 .placeholder(R.drawable.ic_playback_timeslot_placeholder)
                 .error(R.drawable.ic_playback_timeslot_placeholder)
                 .centerCrop()
@@ -549,8 +621,8 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun applyRecordsThumbBorderState() {
-        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
-        val matchesPlayback = (listing.startUnix xor listing.endUnix) == currentArchiveListingId
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex)
+        val matchesPlayback = listing == null || (listing.startUnix xor listing.endUnix) == currentArchiveListingId
         recordsColumnThumb.setBackgroundResource(
             if (matchesPlayback) {
                 R.drawable.bg_playback_records_thumb_border_cyan
@@ -561,8 +633,9 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun applyRecordsScrollArrowDimming() {
-        val atTop = recordsColumnListingIndex <= 0
-        val atBottom = recordsColumnListingIndex >= recordsDayListings.lastIndex
+        val noListings = recordsDayListings.isEmpty()
+        val atTop = noListings || recordsColumnListingIndex <= 0
+        val atBottom = noListings || recordsColumnListingIndex >= recordsDayListings.lastIndex
         recordsColumnScrollUp.alpha = if (atTop) 0.35f else 1f
         recordsColumnScrollDown.alpha = if (atBottom) 0.35f else 1f
     }
@@ -602,10 +675,26 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun updateRecordsInfoPlaybackUi() {
         if (!::recordsInfoOverlay.isInitialized || !recordsInfoOverlay.isVisible) return
-        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex)
+        val p = mediaPlayer
+        if (listing == null) {
+            // Basic mode (no day listings): show actual playback progress from player
+            if (p != null) {
+                val len = mediaLengthMs(p)
+                val cur = p.currentPosition.coerceAtLeast(0L)
+                recordsInfoTimeCurrent.text = formatPlaybackTimeHms(cur)
+                recordsInfoTimeTotal.text = formatPlaybackTimeHms(len)
+                recordsInfoProgress.isVisible = len > 0L
+                if (len > 0L) {
+                    recordsInfoProgress.progress = ((cur * 1000L) / len).toInt().coerceIn(0, 1000)
+                } else {
+                    recordsInfoProgress.progress = 0
+                }
+            }
+            return
+        }
         val listingId = listing.startUnix xor listing.endUnix
         val matchesPlayback = listingId == currentArchiveListingId
-        val p = mediaPlayer
         if (matchesPlayback && p != null) {
             val len = mediaLengthMs(p)
             val cur = p.currentPosition.coerceAtLeast(0L)
@@ -627,13 +716,13 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun recordsBrowsePrev() {
-        if (recordsColumnListingIndex <= 0) return
+        if (recordsDayListings.isEmpty() || recordsColumnListingIndex <= 0) return
         recordsColumnListingIndex--
         bindRecordsColumnPanelUi()
     }
 
     private fun recordsBrowseNext() {
-        if (recordsColumnListingIndex >= recordsDayListings.lastIndex) return
+        if (recordsDayListings.isEmpty() || recordsColumnListingIndex >= recordsDayListings.lastIndex) return
         recordsColumnListingIndex++
         bindRecordsColumnPanelUi()
     }
@@ -678,7 +767,7 @@ class PlaybackVideoFragment : Fragment() {
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    if (recordsColumnListingIndex <= 0) {
+                    if (recordsDayListings.isEmpty() || recordsColumnListingIndex <= 0) {
                         true
                     } else {
                         flashRecordsScrollArrowUp()
@@ -687,7 +776,7 @@ class PlaybackVideoFragment : Fragment() {
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (recordsColumnListingIndex >= recordsDayListings.lastIndex) {
+                    if (recordsDayListings.isEmpty() || recordsColumnListingIndex >= recordsDayListings.lastIndex) {
                         true
                     } else {
                         flashRecordsScrollArrowDown()
@@ -749,6 +838,7 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun closeRecordsColumnAndResume() {
         if (!recordsColumnUserVisible) return
+        recordsEpgLoadJob?.cancel()
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
         }
