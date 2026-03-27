@@ -54,9 +54,10 @@ import java.util.Locale
  * Live channel picker ([PlaybackActivity.LIVE_CATEGORY_ID] + [PlaybackActivity.LIVE_STREAM_ID]): DPAD up/down
  * on the video toggles the column; inside the column, up/down moves between cards (no-op at first/last row),
  * OK switches stream, right/back dismisses.
- * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down toggles a vertical
- * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
- * still applies when the stream is seekable.
+ * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down on video toggles a bottom
+ * overlay (VOD-style card + footer); DPAD up/down on the thumbnail browses listings (▲/▼ flash cyan). At the first
+ * listing, up does nothing; at the last, down does nothing. OK on the thumbnail applies the selection (if changed)
+ * and dismisses; DPAD left/back closes. Left/right chapter strip still applies when the stream is seekable.
  */
 @UnstableApi
 class PlaybackVideoFragment : Fragment() {
@@ -73,8 +74,16 @@ class PlaybackVideoFragment : Fragment() {
     private lateinit var timeCurrent: TextView
     private lateinit var timeTotal: TextView
     private lateinit var progressBar: ProgressBar
-    private lateinit var recordsColumnContainer: View
-    private lateinit var recordsColumnRv: RecyclerView
+    private lateinit var recordsInfoOverlay: View
+    private lateinit var recordsColumnScrollUp: TextView
+    private lateinit var recordsColumnScrollDown: TextView
+    private lateinit var recordsColumnThumb: ImageView
+    private lateinit var recordsInfoTitle: TextView
+    private lateinit var recordsInfoProgress: ProgressBar
+    private lateinit var recordsInfoTimeCurrent: TextView
+    private lateinit var recordsInfoTimeTotal: TextView
+    private lateinit var recordsInfoDescription: TextView
+    private lateinit var recordsInfoMeta: TextView
 
     private val trickSlots = mutableListOf<TrickSlot>()
     private lateinit var trickAdapter: TrickStripAdapter
@@ -87,10 +96,16 @@ class PlaybackVideoFragment : Fragment() {
 
     private var recordsArchiveStreamId: String? = null
     private val recordsDayListings = mutableListOf<EpgListing>()
-    /** Vertical day list visible (DPAD up/down on video); only when [recordsDayListings] non-empty. */
+    /** Records day panel visible (DPAD up/down on video); only when [recordsDayListings] non-empty. */
     private var recordsColumnUserVisible: Boolean = false
     private var currentArchiveListingId: Long = 0L
-    private lateinit var recordsColumnAdapter: RecordsColumnPlaybackAdapter
+    /** Index in [recordsDayListings] for the panel (may differ from playback until user confirms). */
+    private var recordsColumnListingIndex: Int = 0
+
+    private val recordsArrowColorResetRunnable = Runnable {
+        if (!isAdded || !recordsColumnUserVisible) return@Runnable
+        resetRecordsArrowGlyphColorsAndDimming()
+    }
 
     private lateinit var liveChannelColumnContainer: View
     private lateinit var liveChannelColumnRv: RecyclerView
@@ -121,6 +136,7 @@ class PlaybackVideoFragment : Fragment() {
             if (!isAdded) return
             updatePlaybackControlsUi()
             updateVodInfoOverlayUi()
+            updateRecordsInfoPlaybackUi()
             v.postDelayed(this, 500L)
         }
     }
@@ -194,23 +210,23 @@ class PlaybackVideoFragment : Fragment() {
         timeCurrent = view.findViewById(R.id.playback_time_current)
         timeTotal = view.findViewById(R.id.playback_time_total)
         progressBar = view.findViewById(R.id.playback_progress)
-        recordsColumnContainer = view.findViewById(R.id.playback_records_column_container)
-        recordsColumnRv = view.findViewById(R.id.playback_records_column_rv)
+        recordsInfoOverlay = view.findViewById(R.id.playback_records_info_overlay)
+        recordsColumnScrollUp = view.findViewById(R.id.playback_records_scroll_up)
+        recordsColumnScrollDown = view.findViewById(R.id.playback_records_scroll_down)
+        recordsColumnThumb = view.findViewById(R.id.playback_records_col_thumb)
+        recordsInfoTitle = view.findViewById(R.id.playback_records_info_title)
+        recordsInfoProgress = view.findViewById(R.id.playback_records_info_progress)
+        recordsInfoTimeCurrent = view.findViewById(R.id.playback_records_info_time_current)
+        recordsInfoTimeTotal = view.findViewById(R.id.playback_records_info_time_total)
+        recordsInfoDescription = view.findViewById(R.id.playback_records_info_description)
+        recordsInfoMeta = view.findViewById(R.id.playback_records_info_meta)
+        setupRecordsColumnPanelKeys()
 
         trickAdapter = TrickStripAdapter(
             initialPosterUrl = posterUrl,
             slots = trickSlots,
         )
-        recordsColumnAdapter = RecordsColumnPlaybackAdapter(
-            listings = recordsDayListings,
-            onActivate = { listing -> activateRecordsListing(listing) },
-            onCloseColumn = { closeRecordsColumnAndResume() },
-            videoFocusId = R.id.vlc_video_layout,
-        )
-        recordsColumnRv.layoutManager = LinearLayoutManager(requireContext())
-        recordsColumnRv.adapter = recordsColumnAdapter
-        recordsColumnRv.itemAnimator = null
-        recordsColumnContainer.isVisible = false
+        recordsInfoOverlay.isVisible = false
 
         liveChannelColumnContainer = view.findViewById(R.id.playback_live_channels_container)
         liveChannelColumnRv = view.findViewById(R.id.playback_live_channels_rv)
@@ -347,14 +363,7 @@ class PlaybackVideoFragment : Fragment() {
                     if (!seekable) return@setOnKeyListener false
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
                     if (!trickStripUserVisible || !trickRv.isVisible) {
-                        recordsColumnUserVisible = false
-                        recordsColumnContainer.isVisible = false
-                        trickStripUserVisible = true
-                        trickRv.isVisible = true
-                        if (p.isPlaying) p.pause()
-                        syncSelectedTrickToCurrentTime()
-                        centerSelectedTrickCard()
-                        updatePlaybackControlsUi()
+                        if (!openTrickStripForSeeking()) return@setOnKeyListener false
                         true
                     } else {
                         shiftSelectedTrick(delta)
@@ -456,6 +465,9 @@ class PlaybackVideoFragment : Fragment() {
         Log.d(TAG, "onDestroyView → stop/release")
         liveChannelsLoadJob?.cancel()
         view?.removeCallbacks(progressTicker)
+        if (::recordsColumnScrollUp.isInitialized) {
+            recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        }
         mediaPlayer?.let { p ->
             p.stop()
             p.release()
@@ -579,7 +591,7 @@ class PlaybackVideoFragment : Fragment() {
         trickStripUserVisible = false
         trickRv.isVisible = false
         recordsColumnUserVisible = false
-        recordsColumnContainer.isVisible = false
+        recordsInfoOverlay.isVisible = false
         if (!p.isPlaying) p.play()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
@@ -636,43 +648,232 @@ class PlaybackVideoFragment : Fragment() {
         trickStripUserVisible = false
         trickRv.isVisible = false
         recordsColumnUserVisible = true
-        recordsColumnContainer.isVisible = true
-        recordsColumnAdapter.notifyDataSetChanged()
+        recordsInfoOverlay.isVisible = true
+        syncRecordsColumnListingIndexWithPlayback()
+        resetRecordsArrowGlyphColorsAndDimming()
+        bindRecordsColumnPanelUi()
         mediaPlayer?.pause()
-        val idx = recordsDayListings.indexOfFirst { (it.startUnix xor it.endUnix) == currentArchiveListingId }
-            .let { if (it >= 0) it else 0 }
-        recordsColumnRv.scrollToPosition(idx)
-        requestFocusOnRecordsColumnPosition(idx)
+        recordsColumnThumb.post {
+            if (recordsColumnUserVisible && isAdded) recordsColumnThumb.requestFocus()
+        }
         updatePlaybackControlsUi()
     }
 
-    private fun requestFocusOnRecordsColumnPosition(adapterPosition: Int) {
-        recordsColumnRv.post {
-            val h = recordsColumnRv.findViewHolderForAdapterPosition(adapterPosition)
-            if (h != null) {
-                h.itemView.requestFocus()
+    private fun syncRecordsColumnListingIndexWithPlayback() {
+        recordsColumnListingIndex = recordsDayListings.indexOfFirst { (it.startUnix xor it.endUnix) == currentArchiveListingId }
+            .let { if (it >= 0) it else 0 }
+    }
+
+    private fun bindRecordsColumnPanelUi() {
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
+        val timeLabel = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+        recordsInfoTitle.text = listing.title
+        recordsInfoDescription.text = listing.description.trim().ifBlank {
+            getString(R.string.tv_guide_no_description)
+        }
+        recordsInfoMeta.text = formatRecordsMetaLine(listing)
+        recordsColumnThumb.contentDescription = listing.title.ifBlank { listing.description.ifBlank { timeLabel } }
+
+        val img = listing.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (img.isNullOrEmpty()) {
+            Glide.with(recordsColumnThumb).clear(recordsColumnThumb)
+            recordsColumnThumb.scaleType = ScaleType.CENTER_INSIDE
+            recordsColumnThumb.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
+            recordsColumnThumb.setColorFilter(
+                ContextCompat.getColor(requireContext(), R.color.sidebar_accent_cyan),
+                PorterDuff.Mode.SRC_IN,
+            )
+        } else {
+            recordsColumnThumb.clearColorFilter()
+            recordsColumnThumb.scaleType = ScaleType.CENTER_CROP
+            Glide.with(recordsColumnThumb)
+                .load(img)
+                .placeholder(R.drawable.ic_playback_timeslot_placeholder)
+                .error(R.drawable.ic_playback_timeslot_placeholder)
+                .centerCrop()
+                .into(recordsColumnThumb)
+        }
+
+        applyRecordsScrollArrowDimming()
+        applyRecordsThumbBorderState()
+        updateRecordsInfoPlaybackUi()
+    }
+
+    private fun applyRecordsThumbBorderState() {
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
+        val matchesPlayback = (listing.startUnix xor listing.endUnix) == currentArchiveListingId
+        recordsColumnThumb.setBackgroundResource(
+            if (matchesPlayback) {
+                R.drawable.bg_playback_records_thumb_border_cyan
             } else {
-                recordsColumnRv.postDelayed(
-                    {
-                        recordsColumnRv.findViewHolderForAdapterPosition(adapterPosition)?.itemView?.requestFocus()
-                    },
-                    64L,
-                )
+                R.drawable.bg_playback_records_thumb_border_muted
+            },
+        )
+    }
+
+    private fun applyRecordsScrollArrowDimming() {
+        val atTop = recordsColumnListingIndex <= 0
+        val atBottom = recordsColumnListingIndex >= recordsDayListings.lastIndex
+        recordsColumnScrollUp.alpha = if (atTop) 0.35f else 1f
+        recordsColumnScrollDown.alpha = if (atBottom) 0.35f else 1f
+    }
+
+    private fun resetRecordsArrowGlyphColorsAndDimming() {
+        val primary = ContextCompat.getColor(requireContext(), R.color.sidebar_text_primary)
+        recordsColumnScrollUp.setTextColor(primary)
+        recordsColumnScrollDown.setTextColor(primary)
+        applyRecordsScrollArrowDimming()
+    }
+
+    private fun flashRecordsScrollArrowUp() {
+        recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        val primary = ContextCompat.getColor(requireContext(), R.color.sidebar_text_primary)
+        val cyan = ContextCompat.getColor(requireContext(), R.color.sidebar_accent_cyan)
+        recordsColumnScrollDown.setTextColor(primary)
+        recordsColumnScrollUp.setTextColor(cyan)
+        recordsColumnScrollUp.postDelayed(recordsArrowColorResetRunnable, 220L)
+    }
+
+    private fun flashRecordsScrollArrowDown() {
+        recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        val primary = ContextCompat.getColor(requireContext(), R.color.sidebar_text_primary)
+        val cyan = ContextCompat.getColor(requireContext(), R.color.sidebar_accent_cyan)
+        recordsColumnScrollUp.setTextColor(primary)
+        recordsColumnScrollDown.setTextColor(cyan)
+        recordsColumnScrollUp.postDelayed(recordsArrowColorResetRunnable, 220L)
+    }
+
+    private fun formatRecordsMetaLine(listing: EpgListing): String {
+        val range = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
+        val date = IptvTimeUtils.formatDateIsrael(listing.startUnix, "EEEE dd-MM-yyyy")
+        val genre = listing.category?.trim()?.takeIf { it.isNotEmpty() } ?: "—"
+        val dur = IptvTimeUtils.formatDurationHms(listing.endUnix - listing.startUnix)
+        return getString(R.string.playback_records_meta, range, date, genre, dur)
+    }
+
+    private fun updateRecordsInfoPlaybackUi() {
+        if (!::recordsInfoOverlay.isInitialized || !recordsInfoOverlay.isVisible) return
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: return
+        val listingId = listing.startUnix xor listing.endUnix
+        val matchesPlayback = listingId == currentArchiveListingId
+        val p = mediaPlayer
+        if (matchesPlayback && p != null) {
+            val len = mediaLengthMs(p)
+            val cur = p.currentPosition.coerceAtLeast(0L)
+            recordsInfoTimeCurrent.text = formatPlaybackTimeHms(cur)
+            recordsInfoTimeTotal.text = formatPlaybackTimeHms(len)
+            recordsInfoProgress.isVisible = len > 0L
+            if (len > 0L) {
+                recordsInfoProgress.progress = ((cur * 1000L) / len).toInt().coerceIn(0, 1000)
+            } else {
+                recordsInfoProgress.progress = 0
+            }
+        } else {
+            val slotLenMs = (listing.endUnix - listing.startUnix).coerceAtLeast(0L) * 1000L
+            recordsInfoTimeCurrent.text = formatPlaybackTimeHms(0L)
+            recordsInfoTimeTotal.text = formatPlaybackTimeHms(slotLenMs.coerceAtLeast(0L))
+            recordsInfoProgress.isVisible = slotLenMs > 0L
+            recordsInfoProgress.progress = 0
+        }
+    }
+
+    private fun recordsBrowsePrev() {
+        if (recordsColumnListingIndex <= 0) return
+        recordsColumnListingIndex--
+        bindRecordsColumnPanelUi()
+    }
+
+    private fun recordsBrowseNext() {
+        if (recordsColumnListingIndex >= recordsDayListings.lastIndex) return
+        recordsColumnListingIndex++
+        bindRecordsColumnPanelUi()
+    }
+
+    /**
+     * Dismisses records overlay, shows horizontal chapter strip, pauses playback. Returns false if not seekable.
+     */
+    private fun openTrickStripForSeeking(): Boolean {
+        if (::recordsColumnScrollUp.isInitialized) {
+            recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        }
+        recordsColumnUserVisible = false
+        recordsInfoOverlay.isVisible = false
+        val p = mediaPlayer ?: return false
+        val len = mediaLengthMs(p)
+        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L && trickSlots.isNotEmpty()
+        if (!seekable) return false
+        trickStripUserVisible = true
+        trickRv.isVisible = true
+        if (p.isPlaying) p.pause()
+        syncSelectedTrickToCurrentTime()
+        centerSelectedTrickCard()
+        updatePlaybackControlsUi()
+        videoLayout.requestFocus()
+        return true
+    }
+
+    private fun setupRecordsColumnPanelKeys() {
+        val videoFocusId = R.id.vlc_video_layout
+        recordsColumnThumb.nextFocusLeftId = videoFocusId
+
+        recordsColumnThumb.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    if (recordsColumnListingIndex <= 0) {
+                        true
+                    } else {
+                        flashRecordsScrollArrowUp()
+                        recordsBrowsePrev()
+                        true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (recordsColumnListingIndex >= recordsDayListings.lastIndex) {
+                        true
+                    } else {
+                        flashRecordsScrollArrowDown()
+                        recordsBrowseNext()
+                        true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_LEFT,
+                KeyEvent.KEYCODE_DPAD_RIGHT,
+                -> {
+                    if (!openTrickStripForSeeking()) {
+                        closeRecordsColumnAndResume()
+                    }
+                    true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    closeRecordsColumnAndResume()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    confirmRecordsSelectionAndClose()
+                    true
+                }
+                else -> false
             }
         }
     }
 
-    private fun closeRecordsColumnAndResume() {
-        if (!recordsColumnUserVisible) return
-        recordsColumnUserVisible = false
-        recordsColumnContainer.isVisible = false
-        val p = mediaPlayer ?: return
-        if (!p.isPlaying) p.play()
-        videoLayout.requestFocus()
-        updatePlaybackControlsUi()
+    private fun confirmRecordsSelectionAndClose() {
+        val listing = recordsDayListings.getOrNull(recordsColumnListingIndex) ?: run {
+            closeRecordsColumnAndResume()
+            return
+        }
+        val id = listing.startUnix xor listing.endUnix
+        if (id != currentArchiveListingId) {
+            applyRecordsStreamSwitch(listing)
+        }
+        closeRecordsColumnAndResume()
     }
 
-    private fun activateRecordsListing(listing: EpgListing) {
+    private fun applyRecordsStreamSwitch(listing: EpgListing) {
         val sid = recordsArchiveStreamId ?: return
         val player = mediaPlayer ?: return
         val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
@@ -682,10 +883,20 @@ class PlaybackVideoFragment : Fragment() {
         trickStripBuiltForLengthMs = -1L
         trickStripUserVisible = false
         trickRv.isVisible = false
-        recordsColumnUserVisible = false
-        recordsColumnContainer.isVisible = false
         runCatching { player.stop() }
         startPlayback(player, url)
+        updatePlaybackControlsUi()
+    }
+
+    private fun closeRecordsColumnAndResume() {
+        if (!recordsColumnUserVisible) return
+        if (::recordsColumnScrollUp.isInitialized) {
+            recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        }
+        recordsColumnUserVisible = false
+        recordsInfoOverlay.isVisible = false
+        val p = mediaPlayer ?: return
+        if (!p.isPlaying) p.play()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
     }
@@ -1130,103 +1341,6 @@ private class LivePlaybackChannelColumnAdapter(
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
         val name: TextView = itemView.findViewById(R.id.live_channel_name)
-    }
-}
-
-private class RecordsColumnPlaybackAdapter(
-    private val listings: List<EpgListing>,
-    private val onActivate: (EpgListing) -> Unit,
-    private val onCloseColumn: () -> Unit,
-    private val videoFocusId: Int,
-) : RecyclerView.Adapter<RecordsColumnPlaybackAdapter.VH>() {
-
-    override fun getItemCount(): Int = listings.size
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val v = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_playback_records_column, parent, false)
-        return VH(v)
-    }
-
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        val listing = listings[position]
-        val timeLabel = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
-        holder.time.text = timeLabel
-        holder.title.text = listing.title
-        holder.itemView.contentDescription =
-            holder.itemView.context.getString(R.string.playback_cd_trick_seek, timeLabel)
-
-        val img = listing.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
-        if (img.isNullOrEmpty()) {
-            Glide.with(holder.thumb).clear(holder.thumb)
-            holder.thumb.scaleType = ScaleType.CENTER_INSIDE
-            holder.thumb.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
-            holder.thumb.setColorFilter(
-                ContextCompat.getColor(holder.thumb.context, R.color.sidebar_accent_cyan),
-                PorterDuff.Mode.SRC_IN,
-            )
-        } else {
-            holder.thumb.clearColorFilter()
-            holder.thumb.scaleType = ScaleType.CENTER_CROP
-            Glide.with(holder.thumb)
-                .load(img)
-                .placeholder(R.drawable.ic_playback_timeslot_placeholder)
-                .error(R.drawable.ic_playback_timeslot_placeholder)
-                .centerCrop()
-                .into(holder.thumb)
-        }
-
-        holder.itemView.nextFocusLeftId = videoFocusId
-
-        holder.itemView.setOnClickListener { onActivate(listing) }
-        holder.itemView.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            val pos = holder.bindingAdapterPosition
-            if (pos == RecyclerView.NO_POSITION) return@setOnKeyListener false
-            val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
-            val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP ->
-                    if (pos == 0) {
-                        onCloseColumn()
-                        true
-                    } else {
-                        false
-                    }
-                KeyEvent.KEYCODE_BACK -> {
-                    onCloseColumn()
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (pos >= itemCount - 1) return@setOnKeyListener false
-                    if (lm.findViewByPosition(pos + 1) != null) return@setOnKeyListener false
-                    val next = pos + 1
-                    rv.scrollToPosition(next)
-                    rv.post {
-                        rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus()
-                            ?: rv.postDelayed(
-                                { rv.findViewHolderForAdapterPosition(next)?.itemView?.requestFocus() },
-                                64L,
-                            )
-                    }
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER,
-                -> {
-                    onActivate(listing)
-                    true
-                }
-                else -> false
-            }
-        }
-    }
-
-    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val thumb: ImageView = itemView.findViewById(R.id.playback_records_col_thumb)
-        val time: TextView = itemView.findViewById(R.id.playback_records_col_time)
-        val title: TextView = itemView.findViewById(R.id.playback_records_col_title)
     }
 }
 

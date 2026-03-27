@@ -17,6 +17,9 @@
     <string name="playback_error_message">Playback failed: %1$s</string>
     <string name="playback_live">LIVE</string>
     <string name="playback_cd_trick_seek">Seek to %1$s</string>
+    <string name="playback_records_cd_previous_programme">Previous programme</string>
+    <string name="playback_records_cd_next_programme">Next programme</string>
+    <string name="playback_records_meta">%1$s · %2$s | Genre: %3$s | %4$s</string>
 
     <!-- Error messages -->
     <string name="error_fragment_message">An error occurred</string>
