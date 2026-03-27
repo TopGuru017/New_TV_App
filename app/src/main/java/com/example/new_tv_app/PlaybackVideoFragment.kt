@@ -20,6 +20,16 @@ import androidx.core.view.isVisible
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
@@ -30,14 +40,10 @@ import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.Media
-import org.videolan.libvlc.MediaPlayer
-import org.videolan.libvlc.util.VLCVideoLayout
 import java.util.Locale
 
 /**
- * Plays VOD and live IPTV via LibVLC. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
+ * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
  * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
  * Live channel picker ([PlaybackActivity.LIVE_CATEGORY_ID] + [PlaybackActivity.LIVE_STREAM_ID]): DPAD up/down
@@ -47,14 +53,15 @@ import java.util.Locale
  * column of that day’s programmes on the right; pick one to switch archive segment; left/right chapter strip
  * still applies when the stream is seekable.
  */
+@UnstableApi
 class PlaybackVideoFragment : Fragment() {
 
-    private var libVLC: LibVLC? = null
-    private var mediaPlayer: MediaPlayer? = null
+    private var mediaPlayer: ExoPlayer? = null
+    private var httpDataSourceFactory: DefaultHttpDataSource.Factory? = null
     private var currentPlaybackUrl: String = ""
-    private var didCrossProtocolRetry = false
+    private val attemptedPlaybackUrls = linkedSetOf<String>()
 
-    private lateinit var videoLayout: VLCVideoLayout
+    private lateinit var videoLayout: PlayerView
     private lateinit var controlsOverlay: View
     private lateinit var trickRv: RecyclerView
     private lateinit var timeCurrent: TextView
@@ -66,7 +73,7 @@ class PlaybackVideoFragment : Fragment() {
     private val trickSlots = mutableListOf<TrickSlot>()
     private lateinit var trickAdapter: TrickStripAdapter
     private var posterUrl: String? = null
-    /** Last duration used to build trick strip; rebuild when LibVLC reports a new length. */
+    /** Last duration used to build trick strip; rebuild when ExoPlayer reports a new length. */
     private var trickStripBuiltForLengthMs: Long = -1L
     /** Seek chapter cards visible (DPAD left/right on video); playback paused while visible. */
     private var trickStripUserVisible: Boolean = false
@@ -152,7 +159,8 @@ class PlaybackVideoFragment : Fragment() {
                 ?.takeIf { it.isNotEmpty() }
 
         currentPlaybackUrl = url
-        didCrossProtocolRetry = false
+        attemptedPlaybackUrls.clear()
+        attemptedPlaybackUrls.add(url)
         logPlaybackTarget(url, movie.title)
 
         videoLayout = view.findViewById(R.id.vlc_video_layout)
@@ -208,7 +216,7 @@ class PlaybackVideoFragment : Fragment() {
         videoLayout.doOnLayout { vl ->
             Log.d(
                 TAG,
-                "VLCVideoLayout laid out: w=${vl.width} h=${vl.height} " +
+                "PlayerView laid out: w=${vl.width} h=${vl.height} " +
                     "visible=${vl.visibility == View.VISIBLE} isShown=${vl.isShown}",
             )
         }
@@ -245,7 +253,7 @@ class PlaybackVideoFragment : Fragment() {
                     }
                     val p = mediaPlayer ?: return@setOnKeyListener false
                     val len = mediaLengthMs(p)
-                    val seekable = p.isSeekable && len > 1_000L && trickSlots.isNotEmpty()
+                    val seekable = p.isCurrentMediaItemSeekable && len > 1_000L && trickSlots.isNotEmpty()
                     if (!seekable) return@setOnKeyListener false
                     if (trickStripUserVisible || trickRv.isVisible) {
                         if (trickAdapter.itemCount > 0) {
@@ -288,48 +296,58 @@ class PlaybackVideoFragment : Fragment() {
             }
         }
 
-        val options = ArrayList<String>().apply {
-            add("--network-caching=2500")
-            add("--http-reconnect")
-            add("-vv")
-        }
-        Log.d(TAG, "LibVLC options=$options")
-
-        val vlc = LibVLC(requireContext(), options)
-        libVLC = vlc
-        val player = MediaPlayer(vlc)
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
+        httpDataSourceFactory = httpFactory
+        val dataSourceFactory = DefaultDataSource.Factory(requireContext(), httpFactory)
+        val player = ExoPlayer.Builder(requireContext())
+            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .build()
         mediaPlayer = player
+        videoLayout.player = player
 
-        player.setEventListener { event ->
-            logVlcEvent(event)
-            if (event.type == MediaPlayer.Event.EncounteredError) {
-                if (retryWithAlternateSchemeIfNeeded()) return@setEventListener
-                Log.e(TAG, "EncounteredError — check network / URL / codec (see VLC logs above)")
-                view.post {
-                    if (isAdded) {
-                        Toast.makeText(
-                            requireContext(),
-                            getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
-                            Toast.LENGTH_LONG,
-                        ).show()
+        player.addListener(
+            object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    Log.e(TAG, "Player error: code=${error.errorCodeName}", error)
+                    if (retryWithVodContainerFallbackIfNeeded()) return
+                    if (retryWithAlternateSchemeIfNeeded()) return
+                    view.post {
+                        if (isAdded) {
+                            Toast.makeText(
+                                requireContext(),
+                                getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     }
                 }
-                return@setEventListener
-            }
-            when (event.type) {
-                MediaPlayer.Event.LengthChanged,
-                MediaPlayer.Event.SeekableChanged,
-                -> view.post { rebuildTrickStripIfNeeded() }
-                MediaPlayer.Event.Playing -> view.post {
-                    rebuildTrickStripIfNeeded()
-                    startProgressTicker()
-                }
-                else -> {}
-            }
-        }
 
-        Log.d(TAG, "attachViews → VLCVideoLayout")
-        player.attachViews(videoLayout, null, false, false)
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    Log.d(TAG, "isPlaying=$isPlaying")
+                    if (isPlaying) {
+                        view.post {
+                            rebuildTrickStripIfNeeded()
+                            startProgressTicker()
+                        }
+                    }
+                }
+
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    val state = when (playbackState) {
+                        Player.STATE_IDLE -> "IDLE"
+                        Player.STATE_BUFFERING -> "BUFFERING"
+                        Player.STATE_READY -> "READY"
+                        Player.STATE_ENDED -> "ENDED"
+                        else -> "UNKNOWN($playbackState)"
+                    }
+                    Log.d(TAG, "state=$state")
+                    view.post { rebuildTrickStripIfNeeded() }
+                }
+            },
+        )
 
         startPlayback(player, url)
 
@@ -349,17 +367,16 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     override fun onDestroyView() {
-        Log.d(TAG, "onDestroyView → stop/detach/release")
+        Log.d(TAG, "onDestroyView → stop/release")
         liveChannelsLoadJob?.cancel()
         view?.removeCallbacks(progressTicker)
         mediaPlayer?.let { p ->
             p.stop()
-            p.detachViews()
             p.release()
         }
         mediaPlayer = null
-        libVLC?.release()
-        libVLC = null
+        httpDataSourceFactory = null
+        videoLayout.player = null
         super.onDestroyView()
     }
 
@@ -472,7 +489,7 @@ class PlaybackVideoFragment : Fragment() {
     /** Seek to chapter, dismiss strip, resume playback, return focus to video. */
     private fun activateTrickCardAndResume(ms: Long) {
         val p = mediaPlayer ?: return
-        runCatching { p.setTime(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
+        runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
         trickStripUserVisible = false
         trickRv.isVisible = false
         recordsColumnUserVisible = false
@@ -486,7 +503,7 @@ class PlaybackVideoFragment : Fragment() {
         val p = mediaPlayer ?: return
         val len = mediaLengthMs(p)
         if (len <= 0L || trickSlots.isEmpty()) return
-        val t = p.time.coerceIn(0L, len)
+        val t = p.currentPosition.coerceIn(0L, len)
         val n = trickSlots.size
         val idx = ((t * n) / len).toInt().coerceIn(0, n - 1)
         trickRv.scrollToPosition(idx)
@@ -572,7 +589,7 @@ class PlaybackVideoFragment : Fragment() {
             return
         }
         val len = mediaLengthMs(p)
-        val seekable = p.isSeekable && len > 1_000L
+        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L
 
         if (seekable) {
             if (len != trickStripBuiltForLengthMs) {
@@ -624,9 +641,9 @@ class PlaybackVideoFragment : Fragment() {
     private fun updatePlaybackControlsUi() {
         val p = mediaPlayer ?: return
         val len = mediaLengthMs(p)
-        val cur = p.time.coerceAtLeast(0L)
+        val cur = p.currentPosition.coerceAtLeast(0L)
         val stripShowing = trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()
-        val seekableVod = p.isSeekable && len > 1_000L
+        val seekableVod = p.isCurrentMediaItemSeekable && len > 1_000L
         val showChrome = stripShowing && seekableVod
 
         controlsOverlay.isVisible = showChrome
@@ -647,27 +664,60 @@ class PlaybackVideoFragment : Fragment() {
         }
     }
 
-    private fun mediaLengthMs(p: MediaPlayer): Long {
-        val l = p.length
-        return if (l > 0L) l else 0L
+    private fun mediaLengthMs(p: ExoPlayer): Long {
+        val l = p.duration
+        return if (l != C.TIME_UNSET && l > 0L) l else 0L
     }
 
-    private fun startPlayback(player: MediaPlayer, url: String) {
+    private fun startPlayback(player: ExoPlayer, url: String) {
         currentPlaybackUrl = url
-        val media = Media(libVLC ?: return, Uri.parse(url))
-        applyPanelFriendlyHttpOptions(media, url)
-        Log.d(TAG, "Media created, binding to player; url=${sanitizeUrlForLog(url)}")
-        player.media = media
-        media.release()
-        Log.d(TAG, "play() called")
-        player.play()
+        attemptedPlaybackUrls.add(url)
+        applyPanelFriendlyHttpOptions(url)
+        Log.d(TAG, "Media set on ExoPlayer; url=${sanitizeUrlForLog(url)}")
+        runCatching {
+            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+            player.prepare()
+            player.playWhenReady = true
+        }.onFailure { err ->
+            Log.e(TAG, "Failed to start playback for ${sanitizeUrlForLog(url)}", err)
+            if (retryWithVodContainerFallbackIfNeeded()) return
+            if (retryWithAlternateSchemeIfNeeded()) return
+            view?.post {
+                if (isAdded) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun applyPanelFriendlyHttpOptions(streamUrl: String) {
+        val headers = panelFriendlyHttpHeaders(streamUrl)
+        httpDataSourceFactory
+            ?.setUserAgent("Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            ?.setDefaultRequestProperties(headers)
+    }
+
+    private fun retryWithVodContainerFallbackIfNeeded(): Boolean {
+        if (!isVodOrSeriesUrl(currentPlaybackUrl)) return false
+        val next = nextVodFallbackUrl(currentPlaybackUrl) ?: return false
+        val player = mediaPlayer ?: return false
+        Log.w(
+            TAG,
+            "Retrying playback with VOD container fallback: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(next)}",
+        )
+        startPlayback(player, next)
+        return true
     }
 
     private fun retryWithAlternateSchemeIfNeeded(): Boolean {
-        if (didCrossProtocolRetry) return false
-        val alt = alternateScheme(currentPlaybackUrl) ?: return false
+        val alt = alternateScheme(currentPlaybackUrl)
+            ?.takeIf { !attemptedPlaybackUrls.contains(it) }
+            ?: return false
         val player = mediaPlayer ?: return false
-        didCrossProtocolRetry = true
         Log.w(
             TAG,
             "Retrying playback with alternate scheme: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(alt)}",
@@ -684,13 +734,36 @@ class PlaybackVideoFragment : Fragment() {
         else -> null
     }
 
+    private fun isVodOrSeriesUrl(url: String): Boolean {
+        val path = Uri.parse(url).path.orEmpty()
+        return path.contains("/movie/", ignoreCase = true) || path.contains("/series/", ignoreCase = true)
+    }
+
+    private fun nextVodFallbackUrl(url: String): String? {
+        val u = Uri.parse(url)
+        val path = u.path ?: return null
+        val file = path.substringAfterLast('/', "")
+        val dot = file.lastIndexOf('.')
+        if (dot <= 0 || dot >= file.lastIndex) return null
+        val baseName = file.substring(0, dot)
+        val currentExt = file.substring(dot + 1).lowercase(Locale.US)
+        val fallbackOrder = listOf("mp4", "m3u8", "ts")
+        for (ext in fallbackOrder) {
+            if (ext == currentExt) continue
+            val candidatePath = path.removeSuffix(file) + "$baseName.$ext"
+            val candidate = u.buildUpon().path(candidatePath).build().toString()
+            if (!attemptedPlaybackUrls.contains(candidate)) return candidate
+        }
+        return null
+    }
+
     private fun sanitizeUrlForLog(url: String): String {
         val u = Uri.parse(url)
         return "${u.scheme}://${u.host}${u.path.orEmpty()}"
     }
 
     private companion object {
-        const val TAG = "PlaybackVLC"
+        const val TAG = "PlaybackExo"
         const val TRICK_SLOT_COUNT = 18
 
         fun formatPlaybackTimeMs(ms: Long): String {
@@ -705,15 +778,15 @@ class PlaybackVideoFragment : Fragment() {
             }
         }
 
-        fun applyPanelFriendlyHttpOptions(media: Media, streamUrl: String) {
+        fun panelFriendlyHttpHeaders(streamUrl: String): Map<String, String> {
             val u = Uri.parse(streamUrl)
-            val scheme = u.scheme?.lowercase() ?: return
-            val host = u.host ?: return
-            if (scheme != "http" && scheme != "https") return
+            val scheme = u.scheme?.lowercase() ?: return emptyMap()
+            val host = u.host ?: return emptyMap()
+            if (scheme != "http" && scheme != "https") return emptyMap()
             val origin = "$scheme://$host/"
-            media.addOption(":http-referrer=$origin")
-            media.addOption(
-                ":http-user-agent=Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            return mapOf(
+                "Referer" to origin,
+                "Origin" to origin,
             )
         }
 
@@ -723,42 +796,6 @@ class PlaybackVideoFragment : Fragment() {
             Log.i(TAG, "title=${title ?: "?"} host=${u.host} scheme=${u.scheme} lastSegment=$last (full URL omitted — contains credentials)")
         }
 
-        fun logVlcEvent(event: MediaPlayer.Event) {
-            val name = eventTypeName(event.type)
-            val extra = when (event.type) {
-                MediaPlayer.Event.Buffering -> " buffering=${event.buffering}"
-                else -> ""
-            }
-            val level = when (event.type) {
-                MediaPlayer.Event.EncounteredError -> Log.ERROR
-                MediaPlayer.Event.Opening,
-                MediaPlayer.Event.Playing,
-                MediaPlayer.Event.Vout,
-                -> Log.INFO
-                else -> Log.DEBUG
-            }
-            Log.println(level, TAG, "event: $name$extra")
-        }
-
-        fun eventTypeName(type: Int): String = when (type) {
-            MediaPlayer.Event.Opening -> "Opening"
-            MediaPlayer.Event.Buffering -> "Buffering"
-            MediaPlayer.Event.Playing -> "Playing"
-            MediaPlayer.Event.Paused -> "Paused"
-            MediaPlayer.Event.Stopped -> "Stopped"
-            MediaPlayer.Event.EndReached -> "EndReached"
-            MediaPlayer.Event.EncounteredError -> "EncounteredError"
-            MediaPlayer.Event.TimeChanged -> "TimeChanged"
-            MediaPlayer.Event.PositionChanged -> "PositionChanged"
-            MediaPlayer.Event.SeekableChanged -> "SeekableChanged"
-            MediaPlayer.Event.PausableChanged -> "PausableChanged"
-            MediaPlayer.Event.LengthChanged -> "LengthChanged"
-            MediaPlayer.Event.Vout -> "Vout"
-            MediaPlayer.Event.MediaChanged -> "MediaChanged"
-            MediaPlayer.Event.ESAdded -> "ESAdded"
-            MediaPlayer.Event.ESDeleted -> "ESDeleted"
-            else -> "Unknown($type)"
-        }
     }
 }
 

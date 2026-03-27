@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
-    <org.videolan.libvlc.util.VLCVideoLayout
+    <androidx.media3.ui.PlayerView
         android:id="@+id/vlc_video_layout"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:focusable="true"
         android:focusableInTouchMode="true"
-        android:fitsSystemWindows="true" />
+        android:fitsSystemWindows="true"
+        android:keepScreenOn="true"
+        app:show_buffering="never"
+        app:use_controller="false" />
 
     <!-- Bottom trick-play + timeline (VOD / seekable streams) -->
     <LinearLayout

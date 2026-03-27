@@ -21,8 +21,7 @@ android {
         buildConfigField("String", "IPTV_USERNAME", "\"roku1234\"")
         buildConfigField("String", "IPTV_PASSWORD", "\"11111111\"")
 
-        // TV/phones are ARM. Omitting x86/x86_64 avoids packaging LibVLC emulator ABIs
-        // Play often reports 16 KB issues on those .so first. Use an ARM64 emulator to debug.
+        // Keep ARM-only packaging for target TV/phone devices.
         ndk {
             abiFilters.clear()
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
@@ -57,5 +56,8 @@ dependencies {
     implementation(libs.androidx.recyclerview)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.glide)
-    implementation(libs.videolan.libvlc)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
+    implementation(libs.androidx.media3.exoplayer.dash)
+    implementation(libs.androidx.media3.ui)
 }
