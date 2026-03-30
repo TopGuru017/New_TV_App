@@ -45,6 +45,8 @@ import com.example.new_tv_app.iptv.XtreamLiveApi
 import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
@@ -104,6 +106,26 @@ class PlaybackVideoFragment : Fragment() {
         if (!isAdded || !recordsColumnUserVisible) return@Runnable
         resetRecordsArrowGlyphColorsAndDimming()
     }
+
+    // ── Live info overlay ──────────────────────────────────────────────────────────
+    private lateinit var liveInfoOverlay: View
+    private lateinit var liveChannelName: TextView
+    private lateinit var liveCurrentTime: TextView
+    private lateinit var liveEpgRv: RecyclerView
+    private lateinit var liveEpgAdapter: LiveEpgStripAdapter
+
+    private val liveEpgListings = mutableListOf<EpgListing>()
+    /** Currently displayed EPG listing index. –1 = loading / no data. */
+    private var liveEpgIndex: Int = -1
+    private var liveInfoVisible: Boolean = false
+    private var liveEpgLoadJob: Job? = null
+    private var liveStreamId: String? = null
+
+    private val liveArrowResetRunnable = Runnable {
+        if (!isAdded || !liveInfoVisible) return@Runnable
+        liveEpgAdapter.resetArrowColors(liveEpgRv)
+    }
+    // ──────────────────────────────────────────────────────────────────────────────
 
     private lateinit var vodInfoBackCallback: OnBackPressedCallback
 
@@ -209,6 +231,20 @@ class PlaybackVideoFragment : Fragment() {
         )
         recordsInfoOverlay.isVisible = false
 
+        // Bind live info overlay views
+        liveInfoOverlay = view.findViewById(R.id.playback_live_info_overlay)
+        liveChannelName = view.findViewById(R.id.playback_live_channel_name)
+        liveCurrentTime = view.findViewById(R.id.playback_live_current_time)
+        liveEpgRv = view.findViewById(R.id.playback_live_epg_rv)
+        liveEpgAdapter = LiveEpgStripAdapter(nowSeconds = { IptvTimeUtils.nowIsraelSeconds() })
+        liveEpgRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        liveEpgRv.setHasFixedSize(false)
+        liveEpgRv.itemAnimator = null
+        liveEpgRv.adapter = liveEpgAdapter
+        liveInfoOverlay.isVisible = false
+        liveStreamId = requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_STREAM_ID)?.trim()
+        setupLiveInfoKeys()
+
         vodInfoOverlay = view.findViewById(R.id.playback_vod_info_overlay)
         vodInfoThumb = view.findViewById(R.id.playback_vod_info_thumb)
         vodInfoTitle = view.findViewById(R.id.playback_vod_info_title)
@@ -282,11 +318,30 @@ class PlaybackVideoFragment : Fragment() {
                         videoLayout.requestFocus()
                         return@setOnKeyListener true
                     }
+                    // Live stream: open EPG info overlay on DPAD up/down
+                    if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
+                        if (!liveInfoVisible) openLiveInfoOverlay()
+                        return@setOnKeyListener true
+                    }
                     if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty() ||
                         IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
                     ) {
                         if (!recordsColumnUserVisible) {
                             openRecordsColumn()
+                        } else {
+                            // Overlay open; videoLayout may have regained focus – relay navigation
+                            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                if (recordsDayListings.isNotEmpty() && recordsColumnListingIndex > 0) {
+                                    flashRecordsScrollArrowUp()
+                                    recordsBrowsePrev()
+                                }
+                            } else {
+                                if (recordsDayListings.isNotEmpty() && recordsColumnListingIndex < recordsDayListings.lastIndex) {
+                                    flashRecordsScrollArrowDown()
+                                    recordsBrowseNext()
+                                }
+                            }
+                            recordsColumnThumb.requestFocus()
                         }
                         return@setOnKeyListener true
                     }
@@ -427,6 +482,10 @@ class PlaybackVideoFragment : Fragment() {
         recordsEpgLoadJob?.cancel()
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        }
+        liveEpgLoadJob?.cancel()
+        if (::liveEpgRv.isInitialized) {
+            liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         }
         mediaPlayer?.let { p ->
             p.stop()
@@ -849,6 +908,172 @@ class PlaybackVideoFragment : Fragment() {
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
     }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // Live TV info overlay  (today's EPG strip for the current channel)
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private fun openLiveInfoOverlay() {
+        if (liveInfoVisible) return
+        liveInfoVisible = true
+        liveInfoOverlay.isVisible = true
+        bindLiveInfoCard()
+        liveEpgRv.requestFocus()
+        loadLiveEpgIfNeeded()
+    }
+
+    private fun closeLiveInfoOverlay() {
+        if (!liveInfoVisible) return
+        liveEpgLoadJob?.cancel()
+        liveEpgRv.removeCallbacks(liveArrowResetRunnable)
+        liveInfoVisible = false
+        liveInfoOverlay.isVisible = false
+        videoLayout.requestFocus()
+    }
+
+    private fun loadLiveEpgIfNeeded() {
+        val sid = liveStreamId ?: return
+        if (liveEpgListings.isNotEmpty()) return
+        liveEpgLoadJob?.cancel()
+        liveEpgLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                XtreamLiveApi.fetchArchiveEpgTable(sid)
+            }
+            result.getOrNull()?.let { allListings ->
+                val now = IptvTimeUtils.nowIsraelSeconds()
+                val windowStart = now - 12 * 3600L  // past 12 hours
+                val windowEnd   = now + 6  * 3600L  // next 6 hours
+                val todayListings = allListings
+                    .filter { it.endUnix > windowStart && it.startUnix < windowEnd }
+                    .sortedBy { it.startUnix }
+                if (todayListings.isNotEmpty()) {
+                    liveEpgListings.clear()
+                    liveEpgListings.addAll(todayListings)
+                    liveEpgIndex = liveEpgListings.indexOfFirst {
+                        it.startUnix <= now && now < it.endUnix
+                    }.coerceAtLeast(0)
+                    if (liveInfoVisible) bindLiveInfoCard()
+                }
+            }
+        }
+    }
+
+    private fun bindLiveInfoCard() {
+        val now = IptvTimeUtils.nowIsraelSeconds()
+        liveChannelName.text = playbackMovie.title
+        liveCurrentTime.text = IptvTimeUtils.formatTimeIsrael(now)
+        if (liveEpgListings.isNotEmpty()) {
+            liveEpgAdapter.submitList(liveEpgListings.toList(), liveEpgIndex)
+            liveEpgRv.post { centerSelectedEpgCard() }
+        }
+    }
+
+    private fun centerSelectedEpgCard() {
+        val lm = liveEpgRv.layoutManager as? LinearLayoutManager ?: return
+        if (liveEpgAdapter.size() == 0) return
+        val cardW = resources.getDimensionPixelSize(R.dimen.playback_live_card_width)
+        val offset = ((liveEpgRv.width - cardW) / 2).coerceAtLeast(0)
+        lm.scrollToPositionWithOffset(liveEpgAdapter.getSelectedIndex(), offset)
+        liveEpgRv.post {
+            val postOffset = ((liveEpgRv.width - cardW) / 2).coerceAtLeast(0)
+            lm.scrollToPositionWithOffset(liveEpgAdapter.getSelectedIndex(), postOffset)
+        }
+    }
+
+    private fun liveEpgBrowsePrev() {
+        if (liveEpgListings.isEmpty() || liveEpgIndex <= 0) return
+        liveEpgIndex--
+        liveEpgAdapter.setSelectedIndex(liveEpgIndex)
+        liveCurrentTime.text = IptvTimeUtils.formatTimeIsrael(IptvTimeUtils.nowIsraelSeconds())
+        centerSelectedEpgCard()
+    }
+
+    private fun liveEpgBrowseNext() {
+        if (liveEpgListings.isEmpty() || liveEpgIndex >= liveEpgListings.lastIndex) return
+        liveEpgIndex++
+        liveEpgAdapter.setSelectedIndex(liveEpgIndex)
+        liveCurrentTime.text = IptvTimeUtils.formatTimeIsrael(IptvTimeUtils.nowIsraelSeconds())
+        centerSelectedEpgCard()
+    }
+
+    private fun flashLiveArrow(direction: Int) {
+        liveEpgRv.removeCallbacks(liveArrowResetRunnable)
+        liveEpgAdapter.flashArrow(liveEpgRv, direction)
+        liveEpgRv.postDelayed(liveArrowResetRunnable, 350L)
+    }
+
+    private fun setupLiveInfoKeys() {
+        liveEpgRv.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    flashLiveArrow(LiveEpgStripAdapter.FLASH_LEFT)
+                    liveEpgBrowsePrev()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    flashLiveArrow(LiveEpgStripAdapter.FLASH_RIGHT)
+                    liveEpgBrowseNext()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    closeLiveInfoOverlay()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    handleLiveCardSelect()
+                    true
+                }
+                KeyEvent.KEYCODE_BACK -> {
+                    closeLiveInfoOverlay()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** OK pressed on the live EPG card: play live if current, or switch to catch-up if past. */
+    private fun handleLiveCardSelect() {
+        val now = IptvTimeUtils.nowIsraelSeconds()
+        val listing: EpgListing? = liveEpgListings.getOrNull(liveEpgIndex)
+        if (listing == null || (listing.startUnix <= now && now < listing.endUnix)) {
+            // Currently-airing: close overlay and keep watching live
+            closeLiveInfoOverlay()
+            return
+        }
+        if (listing.endUnix <= now) {
+            // Past programme: open catch-up / records playback
+            val sid = liveStreamId ?: run { closeLiveInfoOverlay(); return }
+            val timeshiftUrl = IptvStreamUrls.timeshiftStreamUrl(
+                streamId = sid,
+                startUnix = listing.startUnix,
+                endUnix = listing.endUnix
+            )
+            closeLiveInfoOverlay()
+            val movie = Movie(
+                id = listing.startUnix,
+                title = listing.title,
+                description = listing.description,
+                backgroundImageUrl = listing.imageUrl ?: playbackMovie.backgroundImageUrl,
+                cardImageUrl = listing.imageUrl ?: playbackMovie.cardImageUrl,
+                videoUrl = timeshiftUrl,
+                studio = null,
+            )
+            startActivity(
+                android.content.Intent(requireContext(), PlaybackActivity::class.java).apply {
+                    putExtra(DetailsActivity.MOVIE, movie)
+                    putExtra(PlaybackActivity.RECORDS_ARCHIVE_STREAM_ID, sid)
+                }
+            )
+        }
+        // Future programme: do nothing (already showing info)
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
 
     private fun rebuildTrickStripIfNeeded() {
         val p = mediaPlayer ?: return

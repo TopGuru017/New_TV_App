@@ -20,6 +20,11 @@
     <string name="playback_records_cd_previous_programme">Previous programme</string>
     <string name="playback_records_cd_next_programme">Next programme</string>
     <string name="playback_records_meta">%1$s · %2$s | Genre: %3$s | %4$s</string>
+    <string name="playback_live_help">Press OK to switch / play</string>
+    <string name="playback_live_next_show">Next show</string>
+    <string name="playback_live_badge_live">LIVE</string>
+    <string name="playback_live_badge_records">Records</string>
+    <string name="playback_live_badge_next">Next</string>
 
     <!-- Error messages -->
     <string name="error_fragment_message">An error occurred</string>

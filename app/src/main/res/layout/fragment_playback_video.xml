@@ -421,4 +421,71 @@
             </LinearLayout>
         </LinearLayout>
     </FrameLayout>
+
+    <!-- Live TV: horizontal EPG strip shown on DPAD up/down. Past left, current centre, future right. -->
+    <FrameLayout
+        android:id="@+id/playback_live_info_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:paddingTop="14dp"
+            android:paddingBottom="20dp">
+
+            <!-- Channel name + wall-clock time -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/playback_live_channel_name"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@android:color/white"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    tools:text="Live - Sport 5" />
+
+                <TextView
+                    android:id="@+id/playback_live_current_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:textColor="#CCFFFFFF"
+                    android:textSize="13sp"
+                    tools:text="19:50" />
+            </LinearLayout>
+
+            <!-- Horizontal EPG card strip -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/playback_live_epg_rv"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clipToPadding="false"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:overScrollMode="never"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp" />
+
+        </LinearLayout>
+    </FrameLayout>
+
 </FrameLayout>
