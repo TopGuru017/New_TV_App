@@ -2,6 +2,7 @@ package com.example.new_tv_app
 
 import android.os.Bundle
 import android.view.View
+import androidx.activity.OnBackPressedCallback
 import androidx.fragment.app.FragmentActivity
 import com.example.new_tv_app.iptv.IptvCredentials
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
@@ -19,6 +20,16 @@ class MainActivity : FragmentActivity() {
         val mainContent = findViewById<View>(R.id.main_content)
         val root = window.decorView.findViewById<View>(android.R.id.content)
         sidebar.attachAutoExpandCollapse(root, mainContent)
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                when {
+                    !sidebar.isExpanded() -> sidebar.requestSidebarFocus()
+                    supportFragmentManager.backStackEntryCount > 0 -> supportFragmentManager.popBackStack()
+                    else -> finish()
+                }
+            }
+        })
         val displayName = IptvCredentials.usernameRaw().trim().ifEmpty {
             getString(R.string.profile_display_name)
         }

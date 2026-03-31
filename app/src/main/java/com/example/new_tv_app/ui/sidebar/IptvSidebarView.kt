@@ -313,6 +313,14 @@ class IptvSidebarView @JvmOverloads constructor(
         chain.forEach { it.nextFocusRightId = contentId }
     }
 
+    fun isExpanded(): Boolean = expanded
+
+    /** Expands the sidebar and moves focus to the first nav item. */
+    fun requestSidebarFocus() {
+        setExpanded(true, animate = true)
+        profileRow.requestFocus()
+    }
+
     fun setExpanded(expand: Boolean, animate: Boolean = true) {
         if (expandLocked && expand) return
         if (expand == expanded) return

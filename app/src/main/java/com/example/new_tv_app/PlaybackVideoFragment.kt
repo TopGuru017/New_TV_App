@@ -26,6 +26,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -128,6 +129,13 @@ class PlaybackVideoFragment : Fragment() {
     private var liveCategoryId: String? = null
     private val liveCategoryChannels = mutableListOf<LiveStream>()
     private var liveChannelIndex: Int = -1
+    /** Index of the channel currently *previewed* in the overlay (may differ from [liveChannelIndex]).
+     *  -1 means the overlay is showing the currently-playing channel. */
+    private var livePreviewChannelIndex: Int = -1
+    /** Display name shown in the overlay for the previewed (not yet playing) channel. */
+    private var livePreviewStreamName: String? = null
+    /** Icon URL shown in the overlay for the previewed channel. */
+    private var livePreviewStreamIcon: String? = null
     private var liveCategoryLoadJob: Job? = null
     private lateinit var liveInfoBackCallback: OnBackPressedCallback
 
@@ -160,6 +168,27 @@ class PlaybackVideoFragment : Fragment() {
             updateVodInfoOverlayUi()
             updateRecordsInfoPlaybackUi()
             v.postDelayed(this, 500L)
+        }
+    }
+
+    /**
+     * Proactively re-feeds the same timeshift .m3u8 URL into ExoPlayer every minute so that
+     * the player opens a fresh HTTP session and gets new .ts segment URLs before the server's
+     * TTL window expires. The current playback position is preserved across the re-prepare.
+     */
+    private val urlRefreshRunnable = object : Runnable {
+        override fun run() {
+            val v = view ?: return
+            if (!isAdded) return
+            val player = mediaPlayer ?: return
+            val url = currentPlaybackUrl
+            if (!IptvStreamUrls.isTimeshiftUrl(url)) return
+            val positionMs = player.currentPosition
+            Log.d(TAG, "Proactive HLS refresh at ${positionMs}ms: url=${sanitizeUrlForLog(url)}")
+            player.setMediaItem(buildMediaItemForUrl(url), positionMs)
+            player.prepare()
+            player.playWhenReady = true
+            v.postDelayed(this, URL_REFRESH_INTERVAL_MS)
         }
     }
 
@@ -333,15 +362,15 @@ class PlaybackVideoFragment : Fragment() {
                         videoLayout.requestFocus()
                         return@setOnKeyListener true
                     }
-                    // Live stream: open EPG overlay, or switch channel while it is open
+                    // Live stream: open EPG overlay, or preview adjacent channel while it is open
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
                         if (liveInfoVisible) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                                 flashLiveArrow(LiveEpgStripAdapter.FLASH_UP)
-                                liveSwitchToPrevChannel()
+                                livePreviewPrevChannel()
                             } else {
                                 flashLiveArrow(LiveEpgStripAdapter.FLASH_DOWN)
-                                liveSwitchToNextChannel()
+                                livePreviewNextChannel()
                             }
                         } else {
                             openLiveInfoOverlay()
@@ -429,7 +458,19 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
                     if (liveInfoVisible) {
-                        handleLiveCardSelect()
+                        val previewIdx = livePreviewChannelIndex
+                        if (previewIdx >= 0 && previewIdx != liveChannelIndex &&
+                            liveCategoryChannels.isNotEmpty()
+                        ) {
+                            // User confirmed a different channel — switch now
+                            livePreviewStreamName = null
+                            livePreviewStreamIcon = null
+                            liveChannelIndex = previewIdx
+                            liveSwitchToChannel(liveCategoryChannels[previewIdx])
+                            closeLiveInfoOverlay()
+                        } else {
+                            handleLiveCardSelect()
+                        }
                         return@setOnKeyListener true
                     }
                     val p = mediaPlayer ?: return@setOnKeyListener false
@@ -453,8 +494,17 @@ class PlaybackVideoFragment : Fragment() {
             .setReadTimeoutMs(20_000)
         httpDataSourceFactory = httpFactory
         val dataSourceFactory = DefaultDataSource.Factory(requireContext(), httpFactory)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                120_000, // max 2 min — keeps enough segments pre-fetched for catch-up/timeshift
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+            )
+            .build()
         val player = ExoPlayer.Builder(requireContext())
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setLoadControl(loadControl)
             .build()
         player.repeatMode = Player.REPEAT_MODE_OFF
         mediaPlayer = player
@@ -464,17 +514,23 @@ class PlaybackVideoFragment : Fragment() {
             object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     Log.e(TAG, "Player error: code=${error.errorCodeName}", error)
-                    // A 404 on a timeshift segment means the specific .ts chunk has expired from
-                    // the server's sliding window. Switching URL schemes (http↔https) will still
-                    // return 404, and restarting from position 0 would look like a "loop". Skip
-                    // both retries and let the error message show immediately.
+                    // A 404 on a timeshift segment means the server's TTL window for this
+                    // session has expired. Trigger an immediate URL refresh (same logic as the
+                    // periodic proactive refresh) to obtain a new server session and resume
+                    // playback from the saved position.
                     val isTimeshiftSegmentMissing =
                         error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
                             IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
-                    if (!isTimeshiftSegmentMissing) {
-                        if (retryWithVodContainerFallbackIfNeeded()) return
-                        if (retryWithAlternateSchemeIfNeeded()) return
+                    if (isTimeshiftSegmentMissing) {
+                        Log.d(TAG, "Timeshift 404 → immediate URL refresh")
+                        view?.let { v ->
+                            v.removeCallbacks(urlRefreshRunnable)
+                            v.post(urlRefreshRunnable)
+                        }
+                        return
                     }
+                    if (retryWithVodContainerFallbackIfNeeded()) return
+                    if (retryWithAlternateSchemeIfNeeded()) return
                     view.post {
                         if (isAdded) {
                             Toast.makeText(
@@ -532,6 +588,7 @@ class PlaybackVideoFragment : Fragment() {
     override fun onStop() {
         Log.d(TAG, "onStop → pause()")
         view?.removeCallbacks(progressTicker)
+        view?.removeCallbacks(urlRefreshRunnable)
         mediaPlayer?.pause()
         super.onStop()
     }
@@ -539,6 +596,7 @@ class PlaybackVideoFragment : Fragment() {
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/release")
         view?.removeCallbacks(progressTicker)
+        view?.removeCallbacks(urlRefreshRunnable)
         recordsEpgLoadJob?.cancel()
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
@@ -988,6 +1046,9 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun openLiveInfoOverlay() {
         if (liveInfoVisible) return
+        livePreviewChannelIndex = liveChannelIndex
+        livePreviewStreamName = null
+        livePreviewStreamIcon = null
         liveInfoVisible = true
         liveInfoOverlay.isVisible = true
         liveInfoBackCallback.isEnabled = true
@@ -1004,6 +1065,9 @@ class PlaybackVideoFragment : Fragment() {
         liveInfoBackCallback.isEnabled = false
         liveInfoVisible = false
         liveInfoOverlay.isVisible = false
+        livePreviewChannelIndex = liveChannelIndex
+        livePreviewStreamName = null
+        livePreviewStreamIcon = null
         videoLayout.requestFocus()
     }
 
@@ -1050,16 +1114,58 @@ class PlaybackVideoFragment : Fragment() {
         }
     }
 
-    private fun liveSwitchToPrevChannel() {
-        if (liveCategoryChannels.isEmpty() || liveChannelIndex <= 0) return
-        liveChannelIndex--
-        liveSwitchToChannel(liveCategoryChannels[liveChannelIndex])
+    /** Move the overlay preview one channel up without switching playback. */
+    private fun livePreviewPrevChannel() {
+        val cur = livePreviewChannelIndex.coerceAtLeast(0)
+        if (liveCategoryChannels.isEmpty() || cur <= 0) return
+        livePreviewChannelIndex = cur - 1
+        liveShowChannelPreview(liveCategoryChannels[livePreviewChannelIndex])
     }
 
-    private fun liveSwitchToNextChannel() {
-        if (liveCategoryChannels.isEmpty() || liveChannelIndex >= liveCategoryChannels.lastIndex) return
-        liveChannelIndex++
-        liveSwitchToChannel(liveCategoryChannels[liveChannelIndex])
+    /** Move the overlay preview one channel down without switching playback. */
+    private fun livePreviewNextChannel() {
+        val cur = livePreviewChannelIndex.coerceAtLeast(0)
+        if (liveCategoryChannels.isEmpty() || cur >= liveCategoryChannels.lastIndex) return
+        livePreviewChannelIndex = cur + 1
+        liveShowChannelPreview(liveCategoryChannels[livePreviewChannelIndex])
+    }
+
+    /**
+     * Updates the EPG overlay to show [stream]'s info and EPG without switching the player.
+     * The user must press OK to confirm and actually switch.
+     */
+    private fun liveShowChannelPreview(stream: LiveStream) {
+        livePreviewStreamName = stream.name
+        livePreviewStreamIcon = stream.iconUrl
+        // Clear old EPG so the strip refreshes for the previewed channel
+        liveEpgLoadJob?.cancel()
+        liveEpgRv.removeCallbacks(liveArrowResetRunnable)
+        liveEpgListings.clear()
+        liveEpgIndex = -1
+        liveEpgAdapter.submitList(emptyList())
+        bindLiveInfoCard()
+        // Load EPG for the previewed channel
+        liveEpgLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                XtreamLiveApi.fetchArchiveEpgTable(stream.streamId)
+            }
+            result.getOrNull()?.let { allListings ->
+                val now = IptvTimeUtils.nowIsraelSeconds()
+                val windowStart = now - 12 * 3600L
+                val windowEnd = now + 6 * 3600L
+                val todayListings = allListings
+                    .filter { it.endUnix > windowStart && it.startUnix < windowEnd }
+                    .sortedBy { it.startUnix }
+                if (todayListings.isNotEmpty()) {
+                    liveEpgListings.clear()
+                    liveEpgListings.addAll(todayListings)
+                    liveEpgIndex = liveEpgListings.indexOfFirst {
+                        it.startUnix <= now && now < it.endUnix
+                    }.coerceAtLeast(0)
+                    if (liveInfoVisible) bindLiveInfoCard()
+                }
+            }
+        }
     }
 
     private fun liveSwitchToChannel(stream: LiveStream) {
@@ -1090,10 +1196,12 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun bindLiveInfoCard() {
         val now = IptvTimeUtils.nowIsraelSeconds()
-        liveChannelName.text = playbackMovie.title
+        // While a preview channel is selected show its info; fall back to the playing channel
+        liveChannelName.text = livePreviewStreamName ?: playbackMovie.title
         liveCurrentTime.text = IptvTimeUtils.formatTimeIsrael(now)
-        liveEpgAdapter.channelIconUrl = sequenceOf(playbackMovie.cardImageUrl, playbackMovie.backgroundImageUrl)
-            .firstOrNull { !it.isNullOrBlank() }
+        liveEpgAdapter.channelIconUrl = livePreviewStreamIcon
+            ?: sequenceOf(playbackMovie.cardImageUrl, playbackMovie.backgroundImageUrl)
+                .firstOrNull { !it.isNullOrBlank() }
         if (liveEpgListings.isNotEmpty()) {
             liveEpgAdapter.submitList(liveEpgListings.toList(), liveEpgIndex)
             liveEpgRv.post { centerSelectedEpgCard() }
@@ -1383,6 +1491,11 @@ class PlaybackVideoFragment : Fragment() {
         playbackMovie.videoUrl = url
         attemptedPlaybackUrls.add(url)
         applyPanelFriendlyHttpOptions(url)
+        // Cancel any pending proactive refresh and reschedule for the new URL.
+        view?.removeCallbacks(urlRefreshRunnable)
+        if (IptvStreamUrls.isTimeshiftUrl(url)) {
+            view?.postDelayed(urlRefreshRunnable, URL_REFRESH_INTERVAL_MS)
+        }
         Log.d(TAG, "Media set on ExoPlayer; url=${sanitizeUrlForLog(url)}")
         runCatching {
             player.setMediaItem(buildMediaItemForUrl(url))
@@ -1509,6 +1622,8 @@ class PlaybackVideoFragment : Fragment() {
     private companion object {
         const val TAG = "PlaybackExo"
         const val TRICK_SLOT_STEP_MS = 30_000L
+        /** How often to proactively re-feed the .m3u8 URL for catch-up/timeshift streams. */
+        const val URL_REFRESH_INTERVAL_MS = 60_000L
         /** 24 h in ms — larger than any realistic recording, so ExoPlayer always starts at the
          *  oldest available segment of a live-type timeshift HLS stream rather than the live edge. */
         const val TIMESHIFT_LIVE_TARGET_OFFSET_MS = 24L * 60 * 60 * 1000
