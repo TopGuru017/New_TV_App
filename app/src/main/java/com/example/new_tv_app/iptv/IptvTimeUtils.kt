@@ -6,14 +6,17 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** All IPTV times use Israel timezone. */
 object IptvTimeUtils {
 
+    /** Timezone used for server API calls (timeshift URLs, day boundaries). */
     val ISRAEL_TZ: TimeZone = TimeZone.getTimeZone("Asia/Jerusalem")
+
+    /** Timezone used for all display — matches the device's local clock. */
+    val DISPLAY_TZ: TimeZone = TimeZone.getDefault()
 
     fun formatTimeIsrael(unixSeconds: Long, pattern: String = "HH:mm"): String {
         val sdf = SimpleDateFormat(pattern, Locale.getDefault())
-        sdf.timeZone = ISRAEL_TZ
+        sdf.timeZone = DISPLAY_TZ
         return sdf.format(Date(unixSeconds * 1000L))
     }
 
@@ -22,13 +25,13 @@ object IptvTimeUtils {
 
     fun formatDateIsrael(unixSeconds: Long, pattern: String = "EEEE dd/MM/yyyy"): String {
         val sdf = SimpleDateFormat(pattern, Locale.getDefault())
-        sdf.timeZone = ISRAEL_TZ
+        sdf.timeZone = DISPLAY_TZ
         return sdf.format(Date(unixSeconds * 1000L))
     }
 
     fun nowIsraelSeconds(): Long = System.currentTimeMillis() / 1000L
 
-    /** Xtream timeshift path segment, e.g. `2026-03-22:04-20`. */
+    /** Xtream timeshift path segment, e.g. `2026-03-22:04-20`. Uses server TZ. */
     fun formatTimeshiftStartIsrael(unixSeconds: Long): String {
         val sdf = SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US)
         sdf.timeZone = ISRAEL_TZ
@@ -65,8 +68,9 @@ object IptvTimeUtils {
     }
 
     /**
-     * Last seven Israel calendar days: index 0 = today, then yesterday, …
-     * [RecordsDaySlot.startUnix] is start-of-day in Israel.
+     * Last seven local calendar days: index 0 = today, then yesterday, …
+     * [RecordsDaySlot.startUnix] is start-of-day in Israel (for server queries),
+     * but the label is formatted in local time.
      */
     fun lastSevenDaySlotsIsrael(): List<RecordsDaySlot> {
         val cal = Calendar.getInstance(ISRAEL_TZ)
