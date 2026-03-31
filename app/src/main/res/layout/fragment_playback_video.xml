@@ -437,9 +437,10 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
+            android:clipChildren="false"
             android:orientation="vertical"
             android:paddingTop="14dp"
-            android:paddingBottom="20dp">
+            android:paddingBottom="100dp">
 
             <!-- Channel name + wall-clock time -->
             <LinearLayout
@@ -473,17 +474,16 @@
                     tools:text="19:50" />
             </LinearLayout>
 
-            <!-- Horizontal EPG card strip -->
+            <!-- Horizontal EPG card strip. Cards overflow parent via clipChildren=false. -->
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/playback_live_epg_rv"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:clipToPadding="false"
+                android:descendantFocusability="blocksDescendants"
                 android:focusable="true"
                 android:focusableInTouchMode="true"
-                android:overScrollMode="never"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp" />
+                android:overScrollMode="never" />
 
         </LinearLayout>
     </FrameLayout>

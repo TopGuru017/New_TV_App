@@ -15,6 +15,8 @@ class PlaybackActivity : FragmentActivity() {
         const val LIVE_CATEGORY_ID = "live_category_id"
         /** Live TV: Xtream stream id currently playing (focus in picker). */
         const val LIVE_STREAM_ID = "live_stream_id"
+        /** Live TV: whether this channel has tv_archive / catch-up enabled on the server. */
+        const val LIVE_TV_ARCHIVE = "live_tv_archive"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

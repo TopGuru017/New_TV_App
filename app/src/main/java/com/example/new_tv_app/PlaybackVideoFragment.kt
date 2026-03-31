@@ -120,6 +120,8 @@ class PlaybackVideoFragment : Fragment() {
     private var liveInfoVisible: Boolean = false
     private var liveEpgLoadJob: Job? = null
     private var liveStreamId: String? = null
+    /** True only if the server has tv_archive (catch-up) enabled for this live channel. */
+    private var liveTvArchive: Boolean = false
 
     private val liveArrowResetRunnable = Runnable {
         if (!isAdded || !liveInfoVisible) return@Runnable
@@ -243,7 +245,7 @@ class PlaybackVideoFragment : Fragment() {
         liveEpgRv.adapter = liveEpgAdapter
         liveInfoOverlay.isVisible = false
         liveStreamId = requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_STREAM_ID)?.trim()
-        setupLiveInfoKeys()
+        liveTvArchive = requireActivity().intent.getBooleanExtra(PlaybackActivity.LIVE_TV_ARCHIVE, false)
 
         vodInfoOverlay = view.findViewById(R.id.playback_vod_info_overlay)
         vodInfoThumb = view.findViewById(R.id.playback_vod_info_thumb)
@@ -318,9 +320,9 @@ class PlaybackVideoFragment : Fragment() {
                         videoLayout.requestFocus()
                         return@setOnKeyListener true
                     }
-                    // Live stream: open EPG info overlay on DPAD up/down
+                    // Live stream: toggle EPG strip on DPAD up/down
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
-                        if (!liveInfoVisible) openLiveInfoOverlay()
+                        if (liveInfoVisible) closeLiveInfoOverlay() else openLiveInfoOverlay()
                         return@setOnKeyListener true
                     }
                     if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty() ||
@@ -371,6 +373,17 @@ class PlaybackVideoFragment : Fragment() {
                     if (vodInfoOverlay.isVisible) {
                         hideVodInfoOverlay()
                     }
+                    // Live EPG strip open: left/right scroll the programme row
+                    if (liveInfoVisible) {
+                        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            flashLiveArrow(LiveEpgStripAdapter.FLASH_LEFT)
+                            liveEpgBrowsePrev()
+                        } else {
+                            flashLiveArrow(LiveEpgStripAdapter.FLASH_RIGHT)
+                            liveEpgBrowseNext()
+                        }
+                        return@setOnKeyListener true
+                    }
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
                         return@setOnKeyListener true
                     }
@@ -391,6 +404,10 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
+                    if (liveInfoVisible) {
+                        handleLiveCardSelect()
+                        return@setOnKeyListener true
+                    }
                     val p = mediaPlayer ?: return@setOnKeyListener false
                     if (recordsColumnUserVisible) {
                         closeRecordsColumnAndResume()
@@ -918,7 +935,7 @@ class PlaybackVideoFragment : Fragment() {
         liveInfoVisible = true
         liveInfoOverlay.isVisible = true
         bindLiveInfoCard()
-        liveEpgRv.requestFocus()
+        videoLayout.requestFocus()   // keep focus on videoLayout; its key listener drives navigation
         loadLiveEpgIfNeeded()
     }
 
@@ -968,15 +985,21 @@ class PlaybackVideoFragment : Fragment() {
         }
     }
 
+    /**
+     * Snap the selected EPG card so that the previous card peeks by [R.dimen.playback_live_epg_left_peek]
+     * on the left, and the next card naturally fills the remaining right space (more visible).
+     * The asymmetry (left much smaller than right) creates the carousel depth effect.
+     */
     private fun centerSelectedEpgCard() {
-        val lm = liveEpgRv.layoutManager as? LinearLayoutManager ?: return
         if (liveEpgAdapter.size() == 0) return
-        val cardW = resources.getDimensionPixelSize(R.dimen.playback_live_card_width)
-        val offset = ((liveEpgRv.width - cardW) / 2).coerceAtLeast(0)
+        val lm = liveEpgRv.layoutManager as? LinearLayoutManager ?: return
+        val leftPeek = resources.getDimensionPixelSize(R.dimen.playback_live_epg_left_peek)
+        val cardMargin = (10 * resources.displayMetrics.density).toInt() // item_playback_live_epg_card marginEnd
+        // Selected card left edge sits just after the left-peek portion + the gap between cards
+        val offset = leftPeek + cardMargin
         lm.scrollToPositionWithOffset(liveEpgAdapter.getSelectedIndex(), offset)
         liveEpgRv.post {
-            val postOffset = ((liveEpgRv.width - cardW) / 2).coerceAtLeast(0)
-            lm.scrollToPositionWithOffset(liveEpgAdapter.getSelectedIndex(), postOffset)
+            lm.scrollToPositionWithOffset(liveEpgAdapter.getSelectedIndex(), offset)
         }
     }
 
@@ -1002,39 +1025,7 @@ class PlaybackVideoFragment : Fragment() {
         liveEpgRv.postDelayed(liveArrowResetRunnable, 350L)
     }
 
-    private fun setupLiveInfoKeys() {
-        liveEpgRv.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    flashLiveArrow(LiveEpgStripAdapter.FLASH_LEFT)
-                    liveEpgBrowsePrev()
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    flashLiveArrow(LiveEpgStripAdapter.FLASH_RIGHT)
-                    liveEpgBrowseNext()
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    closeLiveInfoOverlay()
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER,
-                -> {
-                    handleLiveCardSelect()
-                    true
-                }
-                KeyEvent.KEYCODE_BACK -> {
-                    closeLiveInfoOverlay()
-                    true
-                }
-                else -> false
-            }
-        }
-    }
+    // Navigation is handled in videoLayout.setOnKeyListener so focus never leaves the player view.
 
     /** OK pressed on the live EPG card: play live if current, or switch to catch-up if past. */
     private fun handleLiveCardSelect() {
@@ -1047,12 +1038,17 @@ class PlaybackVideoFragment : Fragment() {
         }
         if (listing.endUnix <= now) {
             // Past programme: open catch-up / records playback
+            if (!liveTvArchive) {
+                Toast.makeText(requireContext(), R.string.live_catchup_not_available, Toast.LENGTH_SHORT).show()
+                return
+            }
             val sid = liveStreamId ?: run { closeLiveInfoOverlay(); return }
             val timeshiftUrl = IptvStreamUrls.timeshiftStreamUrl(
                 streamId = sid,
                 startUnix = listing.startUnix,
                 endUnix = listing.endUnix
             )
+            Log.d(TAG, "Opening catch-up: stream=$sid title=\"${listing.title}\" url=${sanitizeUrlForLog(timeshiftUrl)}")
             closeLiveInfoOverlay()
             val movie = Movie(
                 id = listing.startUnix,

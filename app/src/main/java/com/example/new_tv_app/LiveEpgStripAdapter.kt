@@ -78,11 +78,14 @@ class LiveEpgStripAdapter(
         holder.arrowLeft.setTextColor(white)
         holder.arrowRight.setTextColor(white)
 
-        // Thumbnail border
-        holder.thumb.setBackgroundResource(
-            if (selected) R.drawable.bg_playback_records_thumb_border_cyan
-            else R.drawable.bg_playback_records_thumb_border_muted
+        // Card-level border: cyan outline on selected card, plain dark on others
+        holder.itemView.setBackgroundResource(
+            if (selected) R.drawable.bg_playback_live_epg_card_selected
+            else R.drawable.bg_playback_records_info_card
         )
+
+        // Thumbnail — no individual border (card border covers selection state)
+        holder.thumb.setBackgroundResource(0)
 
         // Thumbnail image
         val imageUrl = listing.imageUrl

@@ -43,10 +43,12 @@
     <dimen name="playback_vod_thumb_height">90dp</dimen>
 
     <!-- Playback live EPG strip -->
-    <dimen name="playback_live_card_width">400dp</dimen>
+    <dimen name="playback_live_card_width">700dp</dimen>
     <dimen name="playback_live_arrow_gutter">28dp</dimen>
-    <dimen name="playback_live_epg_thumb_width">110dp</dimen>
-    <dimen name="playback_live_epg_thumb_height">62dp</dimen>
+    <dimen name="playback_live_epg_thumb_width">121dp</dimen>
+    <dimen name="playback_live_epg_thumb_height">93dp</dimen>
+    <!-- Left peek: how much of the previous card shows to the left of the selected card -->
+    <dimen name="playback_live_epg_left_peek">60dp</dimen>
 
     <!-- Search -->
     <dimen name="search_field_min_height">52dp</dimen>

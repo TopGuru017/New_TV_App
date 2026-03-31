@@ -599,6 +599,7 @@ class SearchFragment : Fragment() {
                     putExtra(PlaybackActivity.LIVE_CATEGORY_ID, catId)
                     putExtra(PlaybackActivity.LIVE_STREAM_ID, stream.streamId)
                 }
+                putExtra(PlaybackActivity.LIVE_TV_ARCHIVE, stream.tvArchive)
             },
         )
     }
