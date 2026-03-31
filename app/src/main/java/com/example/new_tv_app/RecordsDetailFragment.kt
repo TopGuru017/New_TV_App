@@ -339,10 +339,12 @@ class RecordsDetailFragment : Fragment() {
             }
         }
 
+        var suppressFocusSwitch = true
+
         channelBarAdapter = RecordsChannelBarAdapter(
             nextFocusLeftOnFirst = R.id.row_records,
             selectedStreamIdProvider = { selectedStreamId },
-            onStreamFocused = { stream -> onStreamPicked(stream) },
+            onStreamFocused = { stream -> if (!suppressFocusSwitch) onStreamPicked(stream) },
             onDpadDownFromChannel = {
                 focusFirstProgramOrDates()
                 true
@@ -380,7 +382,10 @@ class RecordsDetailFragment : Fragment() {
                 selectedStreamId = initial.streamId
                 bindHeader()
                 loadEpg(initial.streamId)
-                channelBar.post { focusSelectedChannelInBar() }
+                channelBar.post {
+                    focusSelectedChannelInBar()
+                    channelBar.post { suppressFocusSwitch = false }
+                }
             } else {
                 error.text = getString(R.string.records_empty_channels)
                 error.isVisible = true
