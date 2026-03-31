@@ -67,7 +67,6 @@ class VodBrowseFragment : Fragment() {
         val loading = view.findViewById<ProgressBar>(R.id.vod_loading)
         val error = view.findViewById<TextView>(R.id.vod_error)
 
-        val watermark = view.findViewById<ImageView>(R.id.vod_hero_watermark)
         val backdrop = view.findViewById<ImageView>(R.id.vod_hero_backdrop)
         val leftTitle = view.findViewById<TextView>(R.id.vod_hero_left_title)
         val badge = view.findViewById<TextView>(R.id.vod_hero_badge)
@@ -88,13 +87,11 @@ class VodBrowseFragment : Fragment() {
                 Glide.with(into).clear(into)
                 into.setImageDrawable(null)
             } else {
-                Glide.with(into).load(url).fitCenter().into(into)
+                Glide.with(into).load(url).centerCrop().into(into)
             }
         }
 
         fun bindHeroEmpty(categoryName: String) {
-            Glide.with(watermark).clear(watermark)
-            watermark.setImageDrawable(null)
             Glide.with(backdrop).clear(backdrop)
             backdrop.setImageDrawable(null)
             leftTitle.text = getString(R.string.vod_empty_select)
@@ -106,7 +103,6 @@ class VodBrowseFragment : Fragment() {
         }
 
         fun bindHeroMovie(item: VodMovieItem, categoryName: String) {
-            loadCover(item.coverUrl, watermark)
             loadCover(item.coverUrl, backdrop)
             leftTitle.text = item.name
             badge.text = getString(R.string.vod_badge_movie)
@@ -117,7 +113,6 @@ class VodBrowseFragment : Fragment() {
         }
 
         fun bindHeroSeries(show: SeriesShow, categoryName: String) {
-            loadCover(show.coverUrl, watermark)
             loadCover(show.coverUrl, backdrop)
             leftTitle.text = show.name
             badge.text = getString(R.string.vod_badge_series)
