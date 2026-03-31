@@ -417,11 +417,12 @@ class PlaybackVideoFragment : Fragment() {
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
                     if (!trickStripUserVisible || !trickRv.isVisible) {
                         if (!openTrickStripForSeeking(initialDelta = delta)) return@setOnKeyListener false
-                        true
                     } else {
                         shiftSelectedTrick(delta)
-                        true
                     }
+                    val slot = trickSlots.getOrNull(selectedTrickIndex)
+                    if (slot != null) seekTrickCardPaused(slot.startMs)
+                    true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
@@ -455,6 +456,7 @@ class PlaybackVideoFragment : Fragment() {
         val player = ExoPlayer.Builder(requireContext())
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
+        player.repeatMode = Player.REPEAT_MODE_OFF
         mediaPlayer = player
         videoLayout.player = player
 
@@ -462,8 +464,17 @@ class PlaybackVideoFragment : Fragment() {
             object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     Log.e(TAG, "Player error: code=${error.errorCodeName}", error)
-                    if (retryWithVodContainerFallbackIfNeeded()) return
-                    if (retryWithAlternateSchemeIfNeeded()) return
+                    // A 404 on a timeshift segment means the specific .ts chunk has expired from
+                    // the server's sliding window. Switching URL schemes (http↔https) will still
+                    // return 404, and restarting from position 0 would look like a "loop". Skip
+                    // both retries and let the error message show immediately.
+                    val isTimeshiftSegmentMissing =
+                        error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                            IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
+                    if (!isTimeshiftSegmentMissing) {
+                        if (retryWithVodContainerFallbackIfNeeded()) return
+                        if (retryWithAlternateSchemeIfNeeded()) return
+                    }
                     view.post {
                         if (isAdded) {
                             Toast.makeText(
@@ -494,6 +505,15 @@ class PlaybackVideoFragment : Fragment() {
                         else -> "UNKNOWN($playbackState)"
                     }
                     Log.d(TAG, "state=$state")
+                    if (playbackState == Player.STATE_ENDED) {
+                        // Recordings are often served as live HLS (no #EXT-X-ENDLIST). When the
+                        // server pushes new manifest segments after end-of-content, ExoPlayer can
+                        // transition back to BUFFERING/READY and restart from position 0. Pausing
+                        // on ENDED prevents that loop for timeshift and VOD content.
+                        if (!IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
+                            mediaPlayer?.pause()
+                        }
+                    }
                     view.post { rebuildTrickStripIfNeeded() }
                 }
             },
@@ -553,6 +573,15 @@ class PlaybackVideoFragment : Fragment() {
         recordsColumnUserVisible = false
         recordsInfoOverlay.isVisible = false
         if (!p.isPlaying) p.play()
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
+    }
+
+    /** Seeks to [ms] while keeping the trick strip open and the player paused. */
+    private fun seekTrickCardPaused(ms: Long) {
+        val p = mediaPlayer ?: return
+        runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
+        if (p.isPlaying) p.pause()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
     }
@@ -888,7 +917,10 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_DPAD_RIGHT,
                 -> {
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
-                    if (!openTrickStripForSeeking(initialDelta = delta)) {
+                    if (openTrickStripForSeeking(initialDelta = delta)) {
+                        val slot = trickSlots.getOrNull(selectedTrickIndex)
+                        if (slot != null) seekTrickCardPaused(slot.startMs)
+                    } else {
                         closeRecordsColumnAndResume()
                     }
                     true
@@ -924,7 +956,7 @@ class PlaybackVideoFragment : Fragment() {
     private fun applyRecordsStreamSwitch(listing: EpgListing) {
         val sid = recordsArchiveStreamId ?: return
         val player = mediaPlayer ?: return
-        val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
+        val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix, listing.startRaw, listing.endRaw)
         currentArchiveListingId = listing.startUnix xor listing.endUnix
         posterUrl = sequenceOf(listing.imageUrl, posterUrl).firstOrNull { !it.isNullOrBlank() }
         trickAdapter.setPosterUrl(posterUrl)
@@ -1129,7 +1161,9 @@ class PlaybackVideoFragment : Fragment() {
             val timeshiftUrl = IptvStreamUrls.timeshiftStreamUrl(
                 streamId = sid,
                 startUnix = listing.startUnix,
-                endUnix = listing.endUnix
+                endUnix = listing.endUnix,
+                startRaw = listing.startRaw,
+                endRaw = listing.endRaw,
             )
             Log.d(TAG, "Opening catch-up: stream=$sid title=\"${listing.title}\" url=${sanitizeUrlForLog(timeshiftUrl)}")
             closeLiveInfoOverlay()
@@ -1351,7 +1385,7 @@ class PlaybackVideoFragment : Fragment() {
         applyPanelFriendlyHttpOptions(url)
         Log.d(TAG, "Media set on ExoPlayer; url=${sanitizeUrlForLog(url)}")
         runCatching {
-            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+            player.setMediaItem(buildMediaItemForUrl(url))
             player.prepare()
             player.playWhenReady = true
         }.onFailure { err ->
@@ -1368,6 +1402,33 @@ class PlaybackVideoFragment : Fragment() {
                 }
             }
         }
+    }
+
+    /**
+     * Builds a [MediaItem] for the given URL. Timeshift URLs are served by many Xtream panels
+     * as live HLS (no `#EXT-X-ENDLIST`) with a sliding segment window. Without special
+     * configuration ExoPlayer would seek to the live edge (end of the recording) instead of
+     * the beginning. Setting a very large [MediaItem.LiveConfiguration.targetOffsetMs] tells
+     * ExoPlayer to position itself as far back from the live edge as possible — i.e. the
+     * oldest available segment — so recordings start from the beginning. Locking
+     * min/max playback speed to 1.0 prevents ExoPlayer from speeding up to "catch" the live
+     * edge, which would cause 404s on segments that have already expired from the window.
+     */
+    private fun buildMediaItemForUrl(url: String): MediaItem {
+        if (IptvStreamUrls.isTimeshiftUrl(url)) {
+            return MediaItem.Builder()
+                .setUri(Uri.parse(url))
+                .setLiveConfiguration(
+                    MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(TIMESHIFT_LIVE_TARGET_OFFSET_MS)
+                        .setMaxOffsetMs(TIMESHIFT_LIVE_TARGET_OFFSET_MS)
+                        .setMinPlaybackSpeed(1.0f)
+                        .setMaxPlaybackSpeed(1.0f)
+                        .build(),
+                )
+                .build()
+        }
+        return MediaItem.fromUri(Uri.parse(url))
     }
 
     private fun applyPanelFriendlyHttpOptions(streamUrl: String) {
@@ -1448,6 +1509,9 @@ class PlaybackVideoFragment : Fragment() {
     private companion object {
         const val TAG = "PlaybackExo"
         const val TRICK_SLOT_STEP_MS = 30_000L
+        /** 24 h in ms — larger than any realistic recording, so ExoPlayer always starts at the
+         *  oldest available segment of a live-type timeshift HLS stream rather than the live edge. */
+        const val TIMESHIFT_LIVE_TARGET_OFFSET_MS = 24L * 60 * 60 * 1000
 
         fun formatPlaybackTimeMs(ms: Long): String {
             val totalSec = (ms / 1000L).coerceAtLeast(0L)

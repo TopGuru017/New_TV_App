@@ -16,6 +16,7 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import com.example.new_tv_app.databinding.FragmentSettingsBinding
 import com.example.new_tv_app.iptv.IptvCredentials
+import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -238,6 +239,7 @@ class SettingsFragment : Fragment() {
         binding.settingsLangEnglish.setBackgroundResource(
             if (!hebrewSelected) R.drawable.bg_settings_option_selected else R.drawable.bg_settings_option_default,
         )
+        activity?.findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.applyLanguage(code)
     }
 
     private fun applyRecordsOrderUi(order: String) {

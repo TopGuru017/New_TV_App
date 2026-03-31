@@ -51,6 +51,7 @@ class RecordsFragment : Fragment() {
         val categoriesRv = view.findViewById<RecyclerView>(R.id.records_categories_list)
         val channelsRv = view.findViewById<RecyclerView>(R.id.records_channels_grid)
         val channelsEmpty = view.findViewById<TextView>(R.id.records_channels_empty)
+        val sidebar = requireActivity().findViewById<com.example.new_tv_app.ui.sidebar.IptvSidebarView>(R.id.iptv_sidebar)
         val sidebarFocusAnchorId = R.id.row_records
         val gridSpan = 6
 
@@ -63,6 +64,8 @@ class RecordsFragment : Fragment() {
             categoriesRecyclerView = categoriesRv,
             selectedCategoryIndex = { categoryAdapter.indexOfCategoryId(selectedCategoryId) },
             onChannelOpen = { stream ->
+                sidebar.lockExpand()
+                sidebar.setExpanded(false)
                 parentFragmentManager.beginTransaction()
                     .replace(R.id.main_content, RecordsDetailFragment.newInstance(stream, selectedCategoryId))
                     .addToBackStack(null)

@@ -1,6 +1,9 @@
 package com.example.new_tv_app.iptv
 
 import android.net.Uri
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Xtream-style direct live URLs (same credentials as [XtreamLiveApi]).
@@ -78,18 +81,88 @@ object IptvStreamUrls {
     /**
      * Xtream-style catch-up URL for recordings (timeshift).
      *
-     * Many Xtream-based panels expect the "duration" path segment in **minutes** (clip length),
-     * not seconds.
+     * Prefer calling the overload that also accepts [startRaw]/[endRaw] whenever an
+     * [EpgListing] is available — those are the raw datetime strings ("yyyy-MM-dd HH:mm:ss")
+     * returned by the server and let us build the URL without any timezone arithmetic.
+     *
+     * This fallback overload always requests the maximum window (8 h = 480 min) because
+     * numeric `stop_timestamp` values from many servers are incorrect (only 1–2 min after
+     * start), and timezone-based corrections are also unreliable.
      */
     fun timeshiftStreamUrl(streamId: String, startUnix: Long, endUnix: Long): String {
         val base = IptvCredentials.preferredBaseUrl().trimEnd('/')
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
         val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
         val id = streamId.trim().trimStart('/')
-        val durationMinutes = ((endUnix - startUnix) / 60L)
-            .toInt()
-            .coerceIn(1, 8 * 60) // 1..480 minutes
+        val durationMinutes = 8 * 60
         val startFmt = IptvTimeUtils.formatTimeshiftStartIsrael(startUnix)
         return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.m3u8"
+    }
+
+    /**
+     * Preferred overload: builds the timeshift URL using the raw datetime strings the server
+     * returned in the EPG ([startRaw] / [endRaw], e.g. `"2026-03-30 20:00:00"`).
+     *
+     * This avoids every timezone pitfall:
+     * - The start segment is built by simple string reformatting ("2026-03-30 20:00:00"
+     *   → "2026-03-30:20-00") — exactly what the server originally reported, zero conversion.
+     * - The duration is the difference between the two raw strings parsed as plain numbers
+     *   (both strings share the same timezone offset, so the difference is always correct).
+     *
+     * Falls back to the numeric overload when either raw string is null or unparseable.
+     */
+    fun timeshiftStreamUrl(
+        streamId: String,
+        startUnix: Long,
+        endUnix: Long,
+        startRaw: String?,
+        endRaw: String?,
+    ): String {
+        val startFmt = startRaw?.let { rawToUrlSegment(it) }
+        val durationMinutes = if (startFmt != null && endRaw != null) {
+            rawDurationMinutes(startRaw!!, endRaw)
+        } else null
+
+        if (startFmt != null && durationMinutes != null) {
+            val base = IptvCredentials.preferredBaseUrl().trimEnd('/')
+            val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
+            val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
+            val id = streamId.trim().trimStart('/')
+            return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.m3u8"
+        }
+        return timeshiftStreamUrl(streamId, startUnix, endUnix)
+    }
+
+    /**
+     * Converts a server datetime string ("2026-03-30 20:00:00" or "2026-03-30 20:00")
+     * to the Xtream URL segment format ("2026-03-30:20-00").
+     * Returns null if the string does not match the expected shape.
+     */
+    private fun rawToUrlSegment(raw: String): String? {
+        val s = raw.trim()
+        val spaceIdx = s.indexOf(' ')
+        if (spaceIdx < 1) return null
+        val date = s.substring(0, spaceIdx)                     // "2026-03-30"
+        val timePart = s.substring(spaceIdx + 1).take(5)        // "20:00"
+        if (timePart.length < 5 || timePart[2] != ':') return null
+        val hhmm = timePart.replace(':', '-')                   // "20-00"
+        return "$date:$hhmm"
+    }
+
+    /**
+     * Parses two server datetime strings as plain numbers (no timezone — both share the same
+     * offset so it cancels in the subtraction) and returns the duration in minutes,
+     * clamped to [1, 480].
+     */
+    private fun rawDurationMinutes(startRaw: String, endRaw: String): Int {
+        return try {
+            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            val tStart = fmt.parse(startRaw.trim())?.time ?: return 8 * 60
+            val tEnd   = fmt.parse(endRaw.trim())?.time   ?: return 8 * 60
+            if (tEnd <= tStart) return 8 * 60
+            ((tEnd - tStart) / 60_000L).toInt().coerceIn(1, 8 * 60)
+        } catch (_: Exception) {
+            8 * 60
+        }
     }
 }

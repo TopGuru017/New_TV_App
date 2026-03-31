@@ -2,6 +2,7 @@ package com.example.new_tv_app.ui.sidebar
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.Context.MODE_PRIVATE
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -64,14 +65,20 @@ class IptvSidebarView @JvmOverloads constructor(
     private lateinit var clockView: TextView
 
     private lateinit var rowSearch: LinearLayout
+    private lateinit var rowSearchLabel: TextView
     private lateinit var rowFavorites: LinearLayout
+    private lateinit var rowFavoritesLabel: TextView
     private lateinit var rowLastWatch: LinearLayout
+    private lateinit var rowLastWatchLabel: TextView
     private lateinit var rowTvGuide: LinearLayout
+    private lateinit var rowTvGuideLabel: TextView
     private lateinit var rowLive: LinearLayout
     private lateinit var rowLiveLabel: TextView
     private lateinit var rowRecords: LinearLayout
+    private lateinit var rowRecordsLabel: TextView
     private lateinit var rowVod: LinearLayout
     private lateinit var rowSettings: LinearLayout
+    private lateinit var rowSettingsLabel: TextView
 
     private val navRows: List<LinearLayout> by lazy {
         listOf(
@@ -95,6 +102,20 @@ class IptvSidebarView @JvmOverloads constructor(
     private var focusRoot: View? = null
     private var globalFocusListener: ViewTreeObserver.OnGlobalFocusChangeListener? = null
     private var mainContentView: View? = null
+
+    private var expandLocked = false
+    private val expandLockHandler = Handler(Looper.getMainLooper())
+    private val expandUnlockRunnable = Runnable { expandLocked = false }
+
+    /**
+     * Temporarily prevents the sidebar from expanding (e.g. during fragment transitions where
+     * focus briefly lands on the sidebar before the incoming fragment is ready).
+     */
+    fun lockExpand(durationMs: Long = 600L) {
+        expandLocked = true
+        expandLockHandler.removeCallbacks(expandUnlockRunnable)
+        expandLockHandler.postDelayed(expandUnlockRunnable, durationMs)
+    }
 
     init {
         setBackgroundResource(R.color.sidebar_background)
@@ -131,6 +152,26 @@ class IptvSidebarView @JvmOverloads constructor(
         }
         applyVisualState(animateWidth = false)
         updateClockText()
+        val savedLang = context.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .getString(KEY_LANGUAGE, "he") ?: "he"
+        applyLanguage(savedLang)
+    }
+
+    /**
+     * Updates all translatable sidebar labels to match the given language code
+     * ("he" = Hebrew, "en" = English).
+     */
+    fun applyLanguage(lang: String) {
+        val isHebrew = lang == "he"
+        rowSearchLabel.text = if (isHebrew) "חיפוש" else context.getString(R.string.sidebar_search)
+        rowFavoritesLabel.text = if (isHebrew) "מועדפים" else context.getString(R.string.sidebar_favorites)
+        rowLastWatchLabel.text = if (isHebrew) "צפייה אחרונה" else context.getString(R.string.sidebar_last_watch)
+        rowTvGuideLabel.text = if (isHebrew) "מדריך טלוויזיה" else context.getString(R.string.sidebar_tv_guide)
+        rowLiveLabel.text = if (isHebrew) "ישיר" else context.getString(R.string.sidebar_live)
+        rowRecordsLabel.text = if (isHebrew) "הקלטות" else context.getString(R.string.sidebar_records)
+        vodSubRows[0].text = if (isHebrew) "תוכניות" else context.getString(R.string.sidebar_vod_series)
+        vodSubRows[1].text = if (isHebrew) "סרטים" else context.getString(R.string.sidebar_vod_movies)
+        rowSettingsLabel.text = if (isHebrew) "הגדרות" else context.getString(R.string.sidebar_settings)
     }
 
     fun setOnProfileClickListener(listener: OnClickListener?) {
@@ -193,14 +234,20 @@ class IptvSidebarView @JvmOverloads constructor(
         clockView = findViewById(R.id.sidebar_clock)
 
         rowSearch = findViewById(R.id.row_search)
+        rowSearchLabel = findViewById(R.id.row_search_label)
         rowFavorites = findViewById(R.id.row_favorites)
+        rowFavoritesLabel = findViewById(R.id.row_favorites_label)
         rowLastWatch = findViewById(R.id.row_last_watch)
+        rowLastWatchLabel = findViewById(R.id.row_last_watch_label)
         rowTvGuide = findViewById(R.id.row_tv_guide)
+        rowTvGuideLabel = findViewById(R.id.row_tv_guide_label)
         rowLive = findViewById(R.id.row_live)
         rowLiveLabel = findViewById(R.id.row_live_label)
         rowRecords = findViewById(R.id.row_records)
+        rowRecordsLabel = findViewById(R.id.row_records_label)
         rowVod = findViewById(R.id.row_vod)
         rowSettings = findViewById(R.id.row_settings)
+        rowSettingsLabel = findViewById(R.id.row_settings_label)
     }
 
     override fun onAttachedToWindow() {
@@ -210,6 +257,7 @@ class IptvSidebarView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         clockHandler.removeCallbacks(clockRunnable)
+        expandLockHandler.removeCallbacks(expandUnlockRunnable)
         removeGlobalFocusListener()
         clearMainContentInset()
         mainContentView = null
@@ -266,6 +314,7 @@ class IptvSidebarView @JvmOverloads constructor(
     }
 
     fun setExpanded(expand: Boolean, animate: Boolean = true) {
+        if (expandLocked && expand) return
         if (expand == expanded) return
         expanded = expand
         if (!expand) vodMenuOpen = false
@@ -373,8 +422,8 @@ class IptvSidebarView @JvmOverloads constructor(
         val slp = layoutParams as? FrameLayout.LayoutParams ?: return
         mainContentView?.let { content ->
             val clp = content.layoutParams as? FrameLayout.LayoutParams ?: return@let
-            if (clp.marginStart != collapsedWidthPx) {
-                clp.marginStart = collapsedWidthPx
+            if (clp.leftMargin != collapsedWidthPx) {
+                clp.leftMargin = collapsedWidthPx
                 content.layoutParams = clp
             }
         }
@@ -397,7 +446,7 @@ class IptvSidebarView @JvmOverloads constructor(
     private fun clearMainContentInset() {
         val content = mainContentView ?: return
         val clp = content.layoutParams as? FrameLayout.LayoutParams ?: return
-        clp.marginStart = 0
+        clp.leftMargin = 0
         content.layoutParams = clp
     }
 
@@ -417,5 +466,10 @@ class IptvSidebarView @JvmOverloads constructor(
             if (ch.isLetter()) return ch.uppercaseChar().toString()
         }
         return "?"
+    }
+
+    companion object {
+        private const val PREFS_NAME = "iptv_settings"
+        private const val KEY_LANGUAGE = "language"
     }
 }

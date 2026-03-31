@@ -230,6 +230,11 @@ object XtreamLiveApi {
                 .trim()
             val cat = decodeXtreamText(o.optString("category_name")).trim().takeIf { it.isNotEmpty() }
                 ?: decodeXtreamText(o.optString("category")).trim().takeIf { it.isNotEmpty() }
+            // Capture raw datetime strings before readUnix discards them. These are used
+            // to build timeshift URLs directly from the server's own time representation,
+            // avoiding any timezone conversion on numeric timestamps.
+            val startRaw = readDateTimeString(o, "start", "start_time")
+            val endRaw   = readDateTimeString(o, "stop", "end", "end_time")
             val start = readUnix(o, "start_timestamp", "start", "start_time")
             val end = readUnix(o, "stop_timestamp", "end_timestamp", "stop", "end", "end_time")
             if (start <= 0L || end <= 0L || end <= start) continue
@@ -244,10 +249,24 @@ object XtreamLiveApi {
                     startUnix = start,
                     endUnix = end,
                     imageUrl = img,
+                    startRaw = startRaw,
+                    endRaw = endRaw,
                 )
             )
         }
         return out
+    }
+
+    /** Returns the raw datetime string (e.g. "2026-03-30 20:00:00") for the first key whose
+     *  value looks like a datetime string rather than a plain number. Returns null when none
+     *  of the keys carry a datetime-shaped value. */
+    private fun readDateTimeString(o: JSONObject, vararg keys: String): String? {
+        for (k in keys) {
+            val v = o.optString(k).trim()
+            // A datetime string has a digit at position 0 and a '-' at position 4
+            if (v.length >= 16 && v[0].isDigit() && v[4] == '-') return v
+        }
+        return null
     }
 
     private fun parseEpgListings(json: String): List<EpgListing> {

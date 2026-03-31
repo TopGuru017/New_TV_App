@@ -189,7 +189,7 @@ class RecordsDetailFragment : Fragment() {
         fun playArchiveListing(listing: EpgListing) {
             val sid = selectedStreamId
             if (sid.isEmpty()) return
-            val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix)
+            val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix, listing.startRaw, listing.endRaw)
             val channelName =
                 barStreams.find { it.streamId == sid }?.name
             val timeRange = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)

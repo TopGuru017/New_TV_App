@@ -24,60 +24,80 @@ class MainActivity : FragmentActivity() {
         }
         sidebar.setProfileDisplayName(displayName.uppercase(Locale.getDefault()))
         sidebar.setOnSearchClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, SearchFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnFavoritesClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, FavoritesFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnLiveClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, LiveTvFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnRecordsClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, RecordsFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnLastWatchClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, HomeContentFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnTvGuideClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, TvGuideFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnVodMoviesClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, VodBrowseFragment.newInstance(VodBrowseFragment.MODE_MOVIES))
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnVodSeriesClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, VodBrowseFragment.newInstance(VodBrowseFragment.MODE_SERIES))
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnProfileClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, ProfileFragment())
                 .addToBackStack(null)
                 .commit()
         }
         sidebar.setOnSettingsClickListener {
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
             supportFragmentManager.beginTransaction()
                 .replace(R.id.main_content, SettingsFragment())
                 .addToBackStack(null)

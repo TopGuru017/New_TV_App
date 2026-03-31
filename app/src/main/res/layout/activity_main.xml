@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:layoutDirection="ltr"
     tools:context=".MainActivity"
     tools:deviceIds="tv">
 
@@ -20,7 +21,7 @@
         android:id="@+id/iptv_sidebar"
         android:layout_width="@dimen/sidebar_width_expanded"
         android:layout_height="match_parent"
-        android:layout_gravity="start"
+        android:layout_gravity="left"
         android:clipToPadding="false"
         android:descendantFocusability="afterDescendants"
         android:elevation="8dp"
