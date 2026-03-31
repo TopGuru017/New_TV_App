@@ -445,7 +445,7 @@ class PlaybackVideoFragment : Fragment() {
                         if (isAdded) {
                             Toast.makeText(
                                 requireContext(),
-                                getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
+                                playbackErrorMessage(),
                                 Toast.LENGTH_LONG,
                             ).show()
                         }
@@ -979,6 +979,8 @@ class PlaybackVideoFragment : Fragment() {
         val now = IptvTimeUtils.nowIsraelSeconds()
         liveChannelName.text = playbackMovie.title
         liveCurrentTime.text = IptvTimeUtils.formatTimeIsrael(now)
+        liveEpgAdapter.channelIconUrl = sequenceOf(playbackMovie.cardImageUrl, playbackMovie.backgroundImageUrl)
+            .firstOrNull { !it.isNullOrBlank() }
         if (liveEpgListings.isNotEmpty()) {
             liveEpgAdapter.submitList(liveEpgListings.toList(), liveEpgIndex)
             liveEpgRv.post { centerSelectedEpgCard() }
@@ -1279,7 +1281,7 @@ class PlaybackVideoFragment : Fragment() {
                 if (isAdded) {
                     Toast.makeText(
                         requireContext(),
-                        getString(R.string.playback_error_message, getString(R.string.error_fragment_message)),
+                        playbackErrorMessage(),
                         Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -1354,6 +1356,13 @@ class PlaybackVideoFragment : Fragment() {
         val u = Uri.parse(url)
         return "${u.scheme}://${u.host}${u.path.orEmpty()}"
     }
+
+    /** Returns a context-appropriate error message for a playback failure. */
+    private fun playbackErrorMessage(): String =
+        if (IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl))
+            getString(R.string.live_catchup_record_unavailable)
+        else
+            getString(R.string.playback_error_message, getString(R.string.error_fragment_message))
 
     private companion object {
         const val TAG = "PlaybackExo"

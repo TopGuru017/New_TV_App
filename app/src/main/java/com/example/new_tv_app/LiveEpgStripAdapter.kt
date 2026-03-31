@@ -14,6 +14,9 @@ class LiveEpgStripAdapter(
     private val nowSeconds: () -> Long,
 ) : RecyclerView.Adapter<LiveEpgStripAdapter.VH>() {
 
+    /** Fallback image shown when an EPG listing has no thumbnail of its own. */
+    var channelIconUrl: String? = null
+
     private val listings = mutableListOf<EpgListing>()
     private var selectedIndex: Int = 0
 
@@ -87,9 +90,10 @@ class LiveEpgStripAdapter(
         // Thumbnail — no individual border (card border covers selection state)
         holder.thumb.setBackgroundResource(0)
 
-        // Thumbnail image
-        val imageUrl = listing.imageUrl
-        if (!imageUrl.isNullOrBlank()) {
+        // Thumbnail image — use EPG art, or fall back to the channel icon
+        val imageUrl = listing.imageUrl?.takeIf { it.isNotBlank() }
+            ?: channelIconUrl?.takeIf { it.isNotBlank() }
+        if (imageUrl != null) {
             Glide.with(holder.thumb).load(imageUrl).into(holder.thumb)
         } else {
             holder.thumb.setImageResource(0)

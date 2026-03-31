@@ -202,6 +202,7 @@
     <string name="records_epg_error">Could not load programme list.</string>
     <string name="records_cd_play">Play recording</string>
     <string name="live_catchup_not_available">Catch-up is not available for this channel</string>
+    <string name="live_catchup_record_unavailable">This record is not available</string>
 
     <!-- TV Guide -->
     <string name="tv_guide_title">TV guide</string>
