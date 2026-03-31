@@ -41,6 +41,7 @@ import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.FavoriteVodStore
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import java.util.Locale
 import kotlinx.coroutines.Job
@@ -122,6 +123,13 @@ class PlaybackVideoFragment : Fragment() {
     private var liveStreamId: String? = null
     /** True only if the server has tv_archive (catch-up) enabled for this live channel. */
     private var liveTvArchive: Boolean = false
+
+    // Channel list for DPAD up/down channel-switching while EPG overlay is open
+    private var liveCategoryId: String? = null
+    private val liveCategoryChannels = mutableListOf<LiveStream>()
+    private var liveChannelIndex: Int = -1
+    private var liveCategoryLoadJob: Job? = null
+    private lateinit var liveInfoBackCallback: OnBackPressedCallback
 
     private val liveArrowResetRunnable = Runnable {
         if (!isAdded || !liveInfoVisible) return@Runnable
@@ -246,6 +254,11 @@ class PlaybackVideoFragment : Fragment() {
         liveInfoOverlay.isVisible = false
         liveStreamId = requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_STREAM_ID)?.trim()
         liveTvArchive = requireActivity().intent.getBooleanExtra(PlaybackActivity.LIVE_TV_ARCHIVE, false)
+        liveCategoryId = requireActivity().intent.getStringExtra(PlaybackActivity.LIVE_CATEGORY_ID)?.trim()
+        liveInfoBackCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() { closeLiveInfoOverlay() }
+        }
+        requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, liveInfoBackCallback)
 
         vodInfoOverlay = view.findViewById(R.id.playback_vod_info_overlay)
         vodInfoThumb = view.findViewById(R.id.playback_vod_info_thumb)
@@ -320,9 +333,19 @@ class PlaybackVideoFragment : Fragment() {
                         videoLayout.requestFocus()
                         return@setOnKeyListener true
                     }
-                    // Live stream: toggle EPG strip on DPAD up/down
+                    // Live stream: open EPG overlay, or switch channel while it is open
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
-                        if (liveInfoVisible) closeLiveInfoOverlay() else openLiveInfoOverlay()
+                        if (liveInfoVisible) {
+                            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                flashLiveArrow(LiveEpgStripAdapter.FLASH_UP)
+                                liveSwitchToPrevChannel()
+                            } else {
+                                flashLiveArrow(LiveEpgStripAdapter.FLASH_DOWN)
+                                liveSwitchToNextChannel()
+                            }
+                        } else {
+                            openLiveInfoOverlay()
+                        }
                         return@setOnKeyListener true
                     }
                     if (recordsDayListings.isNotEmpty() && !recordsArchiveStreamId.isNullOrEmpty() ||
@@ -501,6 +524,7 @@ class PlaybackVideoFragment : Fragment() {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
         }
         liveEpgLoadJob?.cancel()
+        liveCategoryLoadJob?.cancel()
         if (::liveEpgRv.isInitialized) {
             liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         }
@@ -934,15 +958,18 @@ class PlaybackVideoFragment : Fragment() {
         if (liveInfoVisible) return
         liveInfoVisible = true
         liveInfoOverlay.isVisible = true
+        liveInfoBackCallback.isEnabled = true
         bindLiveInfoCard()
         videoLayout.requestFocus()   // keep focus on videoLayout; its key listener drives navigation
         loadLiveEpgIfNeeded()
+        loadLiveCategoryIfNeeded()
     }
 
     private fun closeLiveInfoOverlay() {
         if (!liveInfoVisible) return
         liveEpgLoadJob?.cancel()
         liveEpgRv.removeCallbacks(liveArrowResetRunnable)
+        liveInfoBackCallback.isEnabled = false
         liveInfoVisible = false
         liveInfoOverlay.isVisible = false
         videoLayout.requestFocus()
@@ -973,6 +1000,60 @@ class PlaybackVideoFragment : Fragment() {
                 }
             }
         }
+    }
+
+    /** Loads all channels in [liveCategoryId] once; finds the current channel's index. */
+    private fun loadLiveCategoryIfNeeded() {
+        val catId = liveCategoryId ?: return
+        if (liveCategoryChannels.isNotEmpty()) return
+        liveCategoryLoadJob?.cancel()
+        liveCategoryLoadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { XtreamLiveApi.fetchLiveStreams(catId) }
+            result.onSuccess { channels ->
+                if (!isAdded) return@onSuccess
+                liveCategoryChannels.clear()
+                liveCategoryChannels.addAll(channels)
+                liveChannelIndex = channels.indexOfFirst { it.streamId == liveStreamId }
+            }
+        }
+    }
+
+    private fun liveSwitchToPrevChannel() {
+        if (liveCategoryChannels.isEmpty() || liveChannelIndex <= 0) return
+        liveChannelIndex--
+        liveSwitchToChannel(liveCategoryChannels[liveChannelIndex])
+    }
+
+    private fun liveSwitchToNextChannel() {
+        if (liveCategoryChannels.isEmpty() || liveChannelIndex >= liveCategoryChannels.lastIndex) return
+        liveChannelIndex++
+        liveSwitchToChannel(liveCategoryChannels[liveChannelIndex])
+    }
+
+    private fun liveSwitchToChannel(stream: LiveStream) {
+        liveStreamId = stream.streamId
+        liveTvArchive = stream.tvArchive
+
+        // Update movie info for the new channel
+        playbackMovie.title = stream.name
+        playbackMovie.cardImageUrl = stream.iconUrl
+        playbackMovie.backgroundImageUrl = stream.iconUrl
+
+        // Switch player to new live stream
+        val newUrl = IptvStreamUrls.liveStreamUrl(stream.streamId)
+        val player = mediaPlayer ?: return
+        trickStripUserVisible = false
+        trickRv.isVisible = false
+        runCatching { player.stop() }
+        startPlayback(player, newUrl)
+
+        // Reset EPG data and reload for the new channel
+        liveEpgLoadJob?.cancel()
+        liveEpgListings.clear()
+        liveEpgIndex = -1
+        liveEpgAdapter.submitList(emptyList())
+        bindLiveInfoCard()
+        loadLiveEpgIfNeeded()
     }
 
     private fun bindLiveInfoCard() {
