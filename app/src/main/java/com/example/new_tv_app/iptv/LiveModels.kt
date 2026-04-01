@@ -15,7 +15,11 @@ data class LiveStream(
     val epgChannelId: String?,
     /** Xtream `tv_archive` — channel offers catch-up / TV archive. */
     val tvArchive: Boolean = false,
-)
+) : Serializable {
+    companion object {
+        private const val serialVersionUID = 1L
+    }
+}
 
 data class EpgListing(
     val title: String,

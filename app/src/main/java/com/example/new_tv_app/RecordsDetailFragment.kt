@@ -65,10 +65,16 @@ class RecordsDetailFragment : Fragment() {
         private const val ARG_STREAM_NAME = "stream_name"
         private const val ARG_ICON = "icon"
         private const val ARG_CATEGORY_ID = "category_id"
+        /** When set (from [RecordsFragment]), channel bar is filled without a second full-panel fetch. */
+        private const val ARG_PREFETCHED_BAR = "prefetched_bar_streams"
         private const val PREFS_IPTV = "iptv_settings"
         private const val KEY_RECORDS_ORDER = "records_order"
 
-        fun newInstance(stream: LiveStream, categoryFilterId: String?) =
+        fun newInstance(
+            stream: LiveStream,
+            categoryFilterId: String?,
+            prefetchedBarStreams: ArrayList<LiveStream>? = null,
+        ) =
             RecordsDetailFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_STREAM_ID, stream.streamId)
@@ -76,6 +82,9 @@ class RecordsDetailFragment : Fragment() {
                     putString(ARG_ICON, stream.iconUrl)
                     if (categoryFilterId != null) {
                         putString(ARG_CATEGORY_ID, categoryFilterId)
+                    }
+                    if (prefetchedBarStreams != null) {
+                        putSerializable(ARG_PREFETCHED_BAR, prefetchedBarStreams)
                     }
                 }
             }
@@ -345,6 +354,8 @@ class RecordsDetailFragment : Fragment() {
             nextFocusLeftOnFirst = R.id.row_records,
             selectedStreamIdProvider = { selectedStreamId },
             onStreamFocused = { stream -> if (!suppressFocusSwitch) onStreamPicked(stream) },
+            /** DPAD left/right / click: always sync EPG, even while [suppressFocusSwitch] is true. */
+            onExplicitChannelPick = { stream -> onStreamPicked(stream) },
             onDpadDownFromChannel = {
                 focusFirstProgramOrDates()
                 true
@@ -366,15 +377,23 @@ class RecordsDetailFragment : Fragment() {
 
         bindHeader()
 
+        @Suppress("DEPRECATION")
+        val prefetchedBar = arguments?.getSerializable(ARG_PREFETCHED_BAR) as? ArrayList<LiveStream>
+
         archiveLoadJob = viewLifecycleOwner.lifecycleScope.launch {
-            val arch = XtreamLiveApi.fetchTvArchiveStreams().getOrNull().orEmpty()
-            if (!isAdded) return@launch
             val filterId = categoryFilterId
-            barStreams = if (filterId == null) {
-                arch
-            } else {
-                arch.filter { it.categoryId == filterId }
+            val arch = when {
+                !prefetchedBar.isNullOrEmpty() -> prefetchedBar
+                else -> {
+                    loading.isVisible = true
+                    val result = XtreamLiveApi.fetchTvArchiveStreamsForCategory(filterId)
+                    loading.isVisible = false
+                    if (!isAdded) return@launch
+                    result.getOrNull().orEmpty()
+                }
             }
+            if (!isAdded) return@launch
+            barStreams = arch
             channelBarAdapter.submit(barStreams)
             val initial = barStreams.find { it.streamId == selectedStreamId }
                 ?: barStreams.firstOrNull()
@@ -405,6 +424,7 @@ private class RecordsChannelBarAdapter(
     private val nextFocusLeftOnFirst: Int,
     private val selectedStreamIdProvider: () -> String,
     private val onStreamFocused: (LiveStream) -> Unit,
+    private val onExplicitChannelPick: (LiveStream) -> Unit,
     private val onDpadDownFromChannel: () -> Boolean,
 ) : RecyclerView.Adapter<RecordsChannelBarAdapter.VH>() {
 
@@ -471,18 +491,18 @@ private class RecordsChannelBarAdapter(
                 KeyEvent.KEYCODE_DPAD_DOWN -> onDpadDownFromChannel()
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     if (pos >= itemCount - 1) return@setOnKeyListener false
-                    if (lm.findViewByPosition(pos + 1) != null) return@setOnKeyListener false
                     val next = pos + 1
-                    onStreamFocused(items[next])
+                    onExplicitChannelPick(items[next])
+                    if (lm.findViewByPosition(next) != null) return@setOnKeyListener false
                     rv.scrollToPosition(next)
                     requestFocusRecyclerChildAfterScroll(rv, next)
                     true
                 }
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
                     if (pos <= 0) return@setOnKeyListener false
-                    if (lm.findViewByPosition(pos - 1) != null) return@setOnKeyListener false
                     val prev = pos - 1
-                    onStreamFocused(items[prev])
+                    onExplicitChannelPick(items[prev])
+                    if (lm.findViewByPosition(prev) != null) return@setOnKeyListener false
                     rv.scrollToPosition(prev)
                     requestFocusRecyclerChildAfterScroll(rv, prev)
                     true
@@ -508,7 +528,7 @@ private class RecordsChannelBarAdapter(
         }
         holder.itemView.setOnClickListener {
             holder.itemView.requestFocus()
-            onStreamFocused(stream)
+            onExplicitChannelPick(stream)
         }
     }
 

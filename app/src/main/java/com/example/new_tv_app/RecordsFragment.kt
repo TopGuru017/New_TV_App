@@ -66,8 +66,17 @@ class RecordsFragment : Fragment() {
             onChannelOpen = { stream ->
                 sidebar.lockExpand()
                 sidebar.setExpanded(false)
+                val catId = selectedCategoryId
+                val barList = if (catId == null) {
+                    ArrayList(archiveStreams)
+                } else {
+                    ArrayList(archiveStreams.filter { it.categoryId == catId })
+                }
                 parentFragmentManager.beginTransaction()
-                    .replace(R.id.main_content, RecordsDetailFragment.newInstance(stream, selectedCategoryId))
+                    .replace(
+                        R.id.main_content,
+                        RecordsDetailFragment.newInstance(stream, selectedCategoryId, barList),
+                    )
                     .addToBackStack(null)
                     .commit()
             },

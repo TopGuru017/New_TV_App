@@ -185,7 +185,6 @@ class VodBrowseFragment : Fragment() {
                 val id = selectedCategoryId
                 catalogAdapter.findName(id) ?: "—"
             },
-            focusGridCellAt = { pos -> requestFocusGridCellVod(itemsRv, pos) },
             movies = movies,
             shows = shows,
             onMovieFocused = { m, cat -> showMovieDetail(m, cat) },
@@ -544,18 +543,6 @@ private fun requestFocusVodCategoryAfterScroll(rv: RecyclerView, adapterPosition
     }
 }
 
-private fun requestFocusGridCellVod(rv: RecyclerView, adapterPosition: Int, attemptsRemaining: Int = 24) {
-    rv.scrollToPosition(adapterPosition)
-    rv.post {
-        val h = rv.findViewHolderForAdapterPosition(adapterPosition)
-        if (h != null) {
-            h.itemView.requestFocus()
-        } else if (attemptsRemaining > 0) {
-            rv.postDelayed({ requestFocusGridCellVod(rv, adapterPosition, attemptsRemaining - 1) }, 32L)
-        }
-    }
-}
-
 private class VodGridAdapter(
     private val mode: String,
     private val spanCount: Int,
@@ -563,7 +550,6 @@ private class VodGridAdapter(
     private val categoriesRecyclerView: RecyclerView,
     private val selectedCategoryIndex: () -> Int,
     private val categoryNameProvider: () -> String,
-    private val focusGridCellAt: (Int) -> Unit,
     private val movies: MutableList<VodMovieItem>,
     private val shows: MutableList<SeriesShow>,
     private val onMovieFocused: (VodMovieItem, String) -> Unit,
@@ -601,24 +587,18 @@ private class VodGridAdapter(
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                         if (position == rowStart) {
-                            if (position > 0) {
-                                focusGridCellAt(position - 1)
-                                true
-                            } else {
-                                true
-                            }
+                            // Do not wrap to the previous row's last cell. When the first
+                            // category is selected, leave DPAD_LEFT to the framework so
+                            // nextFocusLeftId can move focus to the category sidebar.
+                            if (idx <= 0) false else true
                         } else {
                             false
                         }
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         if (position == rowEnd) {
-                            if (position < itemCount - 1) {
-                                focusGridCellAt(position + 1)
-                                true
-                            } else {
-                                true
-                            }
+                            // Do not wrap to the next row's first cell.
+                            true
                         } else {
                             false
                         }
@@ -658,24 +638,14 @@ private class VodGridAdapter(
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                         if (position == rowStart) {
-                            if (position > 0) {
-                                focusGridCellAt(position - 1)
-                                true
-                            } else {
-                                true
-                            }
+                            if (idx <= 0) false else true
                         } else {
                             false
                         }
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         if (position == rowEnd) {
-                            if (position < itemCount - 1) {
-                                focusGridCellAt(position + 1)
-                                true
-                            } else {
-                                true
-                            }
+                            true
                         } else {
                             false
                         }

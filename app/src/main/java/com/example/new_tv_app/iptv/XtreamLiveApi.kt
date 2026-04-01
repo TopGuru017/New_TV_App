@@ -64,6 +64,27 @@ object XtreamLiveApi {
     suspend fun fetchTvArchiveStreams(): Result<List<LiveStream>> =
         fetchAllLiveStreamsForSearch().map { streams -> streams.filter { it.tvArchive } }
 
+    /**
+     * Archive-enabled streams for a single category — **one** `get_live_streams` call.
+     * Use this from the catch-up / records UI when a category is already selected instead of
+     * [fetchTvArchiveStreams], which may scan every live category on the panel.
+     *
+     * When [categoryId] is null (“All”), tries [fetchAllLiveStreams] first (single unfiltered
+     * request); if that yields no archive rows, falls back to [fetchTvArchiveStreams].
+     */
+    suspend fun fetchTvArchiveStreamsForCategory(categoryId: String?): Result<List<LiveStream>> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                if (categoryId != null) {
+                    fetchLiveStreams(categoryId).getOrThrow().filter { it.tvArchive }
+                } else {
+                    val bulk = fetchAllLiveStreams().getOrNull().orEmpty().filter { it.tvArchive }
+                    if (bulk.isNotEmpty()) bulk
+                    else fetchTvArchiveStreams().getOrThrow()
+                }
+            }
+        }
+
     suspend fun fetchShortEpg(streamId: String): Result<List<EpgListing>> = withContext(Dispatchers.IO) {
         runCatching {
             parseEpgListings(
