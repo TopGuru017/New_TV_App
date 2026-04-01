@@ -24,8 +24,12 @@ class MainActivity : FragmentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
-                    !sidebar.isExpanded() -> sidebar.requestSidebarFocus()
                     supportFragmentManager.backStackEntryCount > 0 -> supportFragmentManager.popBackStack()
+                    !sidebar.isExpanded() -> {
+                        sidebar.lockExpand()
+                        sidebar.setExpanded(true)
+                        sidebar.requestSidebarFocus()
+                    }
                     else -> finish()
                 }
             }

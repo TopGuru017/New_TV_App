@@ -19,6 +19,7 @@ import com.bumptech.glide.load.resource.bitmap.CenterCrop
 import com.bumptech.glide.load.resource.bitmap.RoundedCorners
 import com.bumptech.glide.request.RequestOptions
 import com.example.new_tv_app.iptv.FavoriteVodStore
+import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 
 /**
  * Favorites list — same horizontal card style as Last Watch VOD rows ([item_last_watch_vod_big]).
@@ -36,11 +37,34 @@ class FavoritesFragment : Fragment() {
 
     private val seriesAdapter = FavoriteVodCardAdapter(
         onOpen = { movie ->
-            startActivity(
-                Intent(requireContext(), PlaybackActivity::class.java).apply {
-                    putExtra(DetailsActivity.MOVIE, movie)
-                },
-            )
+            val url = movie.videoUrl.orEmpty()
+            if (FavoriteVodStore.isSeriesFolderBookmarkVideoUrl(url)) {
+                val sid = FavoriteVodStore.streamIdFromMovieUrl(url)
+                if (sid != null) {
+                    requireActivity().findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.let { sidebar ->
+                        sidebar.lockExpand()
+                        sidebar.setExpanded(false)
+                    }
+                    requireActivity().supportFragmentManager.beginTransaction()
+                        .replace(
+                            R.id.main_content,
+                            VodSeriesFolderFragment.newInstance(
+                                seriesId = sid,
+                                seriesName = movie.title.orEmpty(),
+                                seriesCover = movie.cardImageUrl ?: movie.backgroundImageUrl,
+                                categoryName = movie.description.orEmpty(),
+                            ),
+                        )
+                        .addToBackStack(null)
+                        .commit()
+                }
+            } else {
+                startActivity(
+                    Intent(requireContext(), PlaybackActivity::class.java).apply {
+                        putExtra(DetailsActivity.MOVIE, movie)
+                    },
+                )
+            }
         },
         onRemove = { movie ->
             FavoriteVodStore.removeMovie(requireContext(), movie)
@@ -161,10 +185,10 @@ class FavoritesFragment : Fragment() {
         val movies = mutableListOf<Movie>()
         for (m in all) {
             val p = m.videoUrl.orEmpty()
-            if (p.contains("/series/", ignoreCase = true)) {
-                series.add(m)
-            } else {
-                movies.add(m)
+            when {
+                FavoriteVodStore.isSeriesFolderBookmarkVideoUrl(p) -> series.add(m)
+                p.contains("/series/", ignoreCase = true) -> series.add(m)
+                else -> movies.add(m)
             }
         }
         return series to movies

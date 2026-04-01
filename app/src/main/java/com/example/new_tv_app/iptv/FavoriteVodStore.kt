@@ -13,6 +13,7 @@ object FavoriteVodStore {
 
     private const val PREFS = "iptv_favorite_vod"
     private const val KEY_ENTRIES = "entries_json"
+    private const val SERIES_BOOKMARK_HOST = "series.local"
 
     fun readAll(context: Context): List<Movie> {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -34,6 +35,36 @@ object FavoriteVodStore {
         val id = streamId.trim()
         if (id.isEmpty()) return false
         return readAll(context).any { streamIdFromMovieUrl(it.videoUrl) == id }
+    }
+
+    /** Synthetic URL used when bookmarking a whole series from the series folder screen. */
+    fun seriesFolderBookmarkUrl(seriesId: String): String {
+        val sid = seriesId.trim()
+        return "http://$SERIES_BOOKMARK_HOST/$sid"
+    }
+
+    /** True if [videoUrl] is the synthetic series-folder bookmark (not a playable stream URL). */
+    fun isSeriesFolderBookmarkVideoUrl(videoUrl: String?): Boolean {
+        if (videoUrl.isNullOrBlank()) return false
+        return runCatching {
+            SERIES_BOOKMARK_HOST.equals(Uri.parse(videoUrl.trim()).host, ignoreCase = true)
+        }.getOrDefault(false)
+    }
+
+    /** True if this series is bookmarked (not the same as favoriting a single episode). */
+    fun isSeriesFolderFavorite(context: Context, seriesId: String): Boolean {
+        val sid = seriesId.trim()
+        if (sid.isEmpty()) return false
+        val canonical = seriesFolderBookmarkUrl(sid)
+        return readAll(context).any { movie ->
+            val u = movie.videoUrl?.trim().orEmpty()
+            if (u == canonical) return@any true
+            runCatching {
+                val uri = Uri.parse(u)
+                SERIES_BOOKMARK_HOST.equals(uri.host, ignoreCase = true) &&
+                    streamIdFromMovieUrl(u) == sid
+            }.getOrDefault(false)
+        }
     }
 
     fun add(context: Context, movie: Movie) {

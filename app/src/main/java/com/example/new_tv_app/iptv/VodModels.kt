@@ -31,6 +31,30 @@ data class SeriesShow(
     val addedUnixSeconds: Long? = null,
 )
 
+data class SeriesSeason(
+    val seasonNumber: Int,
+    val title: String,
+)
+
+data class SeriesEpisode(
+    val episodeId: String,
+    val episodeNumber: Int,
+    val title: String,
+    val plot: String?,
+    val coverUrl: String?,
+    val containerExtension: String,
+    val seasonNumber: Int,
+)
+
+data class SeriesDetails(
+    val seriesId: String,
+    val name: String,
+    val plot: String?,
+    val coverUrl: String?,
+    val seasons: List<SeriesSeason>,
+    val episodesBySeason: Map<Int, List<SeriesEpisode>>,
+)
+
 /** True when [addedUnixSeconds] is from the server and falls in the last 24 hours (device clock). */
 fun isVodNewWithin24Hours(addedUnixSeconds: Long?): Boolean {
     if (addedUnixSeconds == null || addedUnixSeconds <= 0L) return false

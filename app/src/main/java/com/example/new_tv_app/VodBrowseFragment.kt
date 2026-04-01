@@ -11,7 +11,6 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -28,6 +27,7 @@ import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.XtreamVodApi
+import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -56,11 +56,43 @@ class VodBrowseFragment : Fragment() {
     private lateinit var catalogAdapter: VodCatalogAdapter
     private lateinit var gridAdapter: VodGridAdapter
 
+    /** Kept across [openSeriesFolder]: hide/add so the list can refocus this row when the folder closes. */
+    private var vodItemsRecyclerView: RecyclerView? = null
+    private var restoreSeriesGridFocusId: String? = null
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
         savedInstanceState: Bundle?,
     ): View = inflater.inflate(R.layout.fragment_vod_browse, container, false)
+
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (hidden || mode != MODE_SERIES) return
+        requireActivity().findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.let { sidebar ->
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
+        }
+        val sid = restoreSeriesGridFocusId ?: return
+        restoreSeriesGridFocusId = null
+        vodItemsRecyclerView?.post {
+            if (isAdded && !isHidden) requestFocusSeriesInGrid(sid)
+        }
+    }
+
+    private fun requestFocusSeriesInGrid(seriesId: String) {
+        if (mode != MODE_SERIES) return
+        val itemsRv = vodItemsRecyclerView ?: return
+        val idx = shows.indexOfFirst { it.seriesId == seriesId }
+        if (idx < 0) return
+        itemsRv.scrollToPosition(idx)
+        itemsRv.post {
+            itemsRv.findViewHolderForAdapterPosition(idx)?.itemView?.requestFocus()
+                ?: itemsRv.post {
+                    itemsRv.findViewHolderForAdapterPosition(idx)?.itemView?.requestFocus()
+                }
+        }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -78,6 +110,7 @@ class VodBrowseFragment : Fragment() {
 
         val categoriesRv = view.findViewById<RecyclerView>(R.id.vod_categories_list)
         val itemsRv = view.findViewById<RecyclerView>(R.id.vod_items_list)
+        vodItemsRecyclerView = itemsRv
         val itemsEmpty = view.findViewById<TextView>(R.id.vod_items_empty)
 
         val sidebarFocusAnchorId =
@@ -195,23 +228,26 @@ class VodBrowseFragment : Fragment() {
                 startPlayback(m.name, cat, m.coverUrl, url)
             },
             onSeriesPlay = { s, cat ->
-                viewLifecycleOwner.lifecycleScope.launch {
-                    val r = XtreamVodApi.fetchFirstSeriesEpisode(s.seriesId)
-                    if (!isAdded) return@launch
-                    r.fold(
-                        onSuccess = { (epId, ext) ->
-                            val url = IptvStreamUrls.seriesEpisodeUrl(epId, ext)
-                            startPlayback(s.name, cat, s.coverUrl, url)
-                        },
-                        onFailure = {
-                            Toast.makeText(
-                                requireContext(),
-                                R.string.vod_series_episode_error,
-                                Toast.LENGTH_LONG,
-                            ).show()
-                        },
-                    )
+                requireActivity().findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.let { sidebar ->
+                    sidebar.lockExpand()
+                    sidebar.setExpanded(false)
                 }
+                restoreSeriesGridFocusId = s.seriesId
+                parentFragmentManager.beginTransaction()
+                    .setReorderingAllowed(true)
+                    .hide(this@VodBrowseFragment)
+                    .add(
+                        R.id.main_content,
+                        VodSeriesFolderFragment.newInstance(
+                            seriesId = s.seriesId,
+                            seriesName = s.name,
+                            seriesCover = s.coverUrl,
+                            categoryName = cat,
+                            seriesPlotFromList = s.plot,
+                        ),
+                    )
+                    .addToBackStack(null)
+                    .commit()
             },
         )
 
@@ -402,6 +438,7 @@ class VodBrowseFragment : Fragment() {
 
     override fun onDestroyView() {
         loadItemsJob?.cancel()
+        vodItemsRecyclerView = null
         super.onDestroyView()
     }
 
@@ -409,9 +446,13 @@ class VodBrowseFragment : Fragment() {
         const val ARG_MODE = "vod_mode"
         const val MODE_MOVIES = "movies"
         const val MODE_SERIES = "series"
+        const val SERIES_FOLDER_RESULT_KEY = "series_folder_result_key"
+        const val SERIES_FOLDER_RESULT_SERIES_ID = "series_folder_result_series_id"
 
         fun newInstance(mode: String) = VodBrowseFragment().apply {
-            arguments = bundleOf(ARG_MODE to mode)
+            arguments = Bundle().apply {
+                putString(ARG_MODE, mode)
+            }
         }
     }
 }

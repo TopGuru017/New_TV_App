@@ -92,6 +92,13 @@ object XtreamVodApi {
         }
     }
 
+    suspend fun fetchSeriesDetails(seriesId: String): Result<SeriesDetails> = withContext(Dispatchers.IO) {
+        runCatching {
+            val json = get("get_series_info", "series_id" to seriesId)
+            parseSeriesDetailsFromInfo(seriesId, json)
+        }
+    }
+
     private fun get(action: String, vararg extra: Pair<String, String>): String {
         val base = IptvCredentials.baseUrl()
         val u = URLEncoder.encode(IptvCredentials.usernameRaw(), StandardCharsets.UTF_8.name())
@@ -235,5 +242,102 @@ object XtreamVodApi {
             }
         }
         return null
+    }
+
+    /** Xtream panels vary: Hebrew/local text is often in `description` or `overview` while `plot` is empty or English. */
+    private fun readSeriesPlotFromInfo(info: JSONObject?, root: JSONObject): String? {
+        val candidates = ArrayList<String>()
+        fun addFrom(o: JSONObject?, vararg keys: String) {
+            if (o == null) return
+            for (k in keys) {
+                val s = o.optString(k).trim()
+                if (s.isNotEmpty()) candidates.add(s)
+            }
+        }
+        addFrom(info, "plot", "description", "overview", "storyline")
+        addFrom(root, "plot", "description", "overview")
+        if (candidates.isEmpty()) return null
+        return candidates.maxByOrNull { it.length }?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun parseSeriesDetailsFromInfo(seriesId: String, json: String): SeriesDetails {
+        val t = json.trim()
+        if (!t.startsWith("{")) error("Invalid series info")
+        val root = JSONObject(t)
+        val info = root.optJSONObject("info")
+        val seriesName = info?.optString("name").orEmpty().ifBlank { seriesId }
+        val seriesPlot = readSeriesPlotFromInfo(info, root)
+        val seriesCover = info?.optString("cover")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: info?.optString("cover_big")?.trim()?.takeIf { it.isNotEmpty() }
+
+        val seasonsArr = root.optJSONArray("seasons")
+        val seasonTitles = LinkedHashMap<Int, String>()
+        if (seasonsArr != null) {
+            for (i in 0 until seasonsArr.length()) {
+                val o = seasonsArr.optJSONObject(i) ?: continue
+                val number = o.optInt("season_number", -1)
+                if (number < 0) continue
+                val title = o.optString("name").ifBlank { "Season $number" }
+                seasonTitles[number] = title
+            }
+        }
+
+        val episodesBySeason = LinkedHashMap<Int, MutableList<SeriesEpisode>>()
+        val episodesObj = root.optJSONObject("episodes")
+        if (episodesObj != null) {
+            val keys = episodesObj.keys().asSequence().toList()
+            for (seasonKey in keys) {
+                val seasonNum = seasonKey.toIntOrNull() ?: continue
+                val arr = episodesObj.optJSONArray(seasonKey) ?: continue
+                val bucket = episodesBySeason.getOrPut(seasonNum) { ArrayList() }
+                for (i in 0 until arr.length()) {
+                    val ep = arr.optJSONObject(i) ?: continue
+                    val id = ep.optString("id").ifBlank { ep.optString("stream_id") }.trim()
+                    if (id.isEmpty()) continue
+                    val episodeNum = ep.optInt("episode_num", i + 1).coerceAtLeast(1)
+                    val title = ep.optString("title").ifBlank {
+                        ep.optString("name").ifBlank { "Episode $episodeNum" }
+                    }
+                    val plot = ep.optString("plot").trim().takeIf { it.isNotEmpty() }
+                    val cover = ep.optString("movie_image").trim().takeIf { it.isNotEmpty() }
+                        ?: ep.optString("cover").trim().takeIf { it.isNotEmpty() }
+                    val ext = ep.optString("container_extension").trim().removePrefix(".").ifBlank { "mp4" }
+                    bucket.add(
+                        SeriesEpisode(
+                            episodeId = id,
+                            episodeNumber = episodeNum,
+                            title = title,
+                            plot = plot,
+                            coverUrl = cover,
+                            containerExtension = ext,
+                            seasonNumber = seasonNum,
+                        ),
+                    )
+                }
+            }
+        }
+
+        for ((_, list) in episodesBySeason) {
+            list.sortBy { it.episodeNumber }
+        }
+
+        val seasonNumbers = linkedSetOf<Int>()
+        seasonNumbers.addAll(seasonTitles.keys)
+        seasonNumbers.addAll(episodesBySeason.keys)
+        val seasons = seasonNumbers.sorted().map { num ->
+            SeriesSeason(
+                seasonNumber = num,
+                title = seasonTitles[num] ?: "Season $num",
+            )
+        }
+
+        return SeriesDetails(
+            seriesId = seriesId,
+            name = seriesName,
+            plot = seriesPlot,
+            coverUrl = seriesCover,
+            seasons = seasons,
+            episodesBySeason = episodesBySeason,
+        )
     }
 }

@@ -140,6 +140,13 @@
     <string name="vod_badge_series">Series</string>
     <string name="vod_new_badge">NEW</string>
     <string name="vod_series_episode_error">Could not open episode list for this series.</string>
+    <string name="vod_series_episodes_title">Episodes</string>
+    <string name="vod_series_loading">Loading seasons and episodes…</string>
+    <string name="vod_series_sort">Toggle episode order</string>
+    <string name="vod_series_order_desc">↓ Newest first</string>
+    <string name="vod_series_order_asc">↑ Oldest first</string>
+    <string name="vod_series_season_label">Season %1$s</string>
+    <string name="vod_series_episode_label">Episode %1$d</string>
 
     <!-- Settings (in-app) -->
     <string name="settings_title">Settings</string>
