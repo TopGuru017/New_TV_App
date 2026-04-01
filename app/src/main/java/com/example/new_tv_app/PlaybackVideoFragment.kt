@@ -24,8 +24,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import com.example.new_tv_app.playback.TimeshiftAwareDataSourceFactory
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -63,7 +63,7 @@ import kotlinx.coroutines.withContext
 class PlaybackVideoFragment : Fragment() {
 
     private var mediaPlayer: ExoPlayer? = null
-    private var httpDataSourceFactory: DefaultHttpDataSource.Factory? = null
+    private var timeshiftDataSourceFactory: TimeshiftAwareDataSourceFactory? = null
     private var currentPlaybackUrl: String = ""
     private val attemptedPlaybackUrls = linkedSetOf<String>()
 
@@ -168,27 +168,6 @@ class PlaybackVideoFragment : Fragment() {
             updateVodInfoOverlayUi()
             updateRecordsInfoPlaybackUi()
             v.postDelayed(this, 500L)
-        }
-    }
-
-    /**
-     * Proactively re-feeds the same timeshift .m3u8 URL into ExoPlayer every minute so that
-     * the player opens a fresh HTTP session and gets new .ts segment URLs before the server's
-     * TTL window expires. The current playback position is preserved across the re-prepare.
-     */
-    private val urlRefreshRunnable = object : Runnable {
-        override fun run() {
-            val v = view ?: return
-            if (!isAdded) return
-            val player = mediaPlayer ?: return
-            val url = currentPlaybackUrl
-            if (!IptvStreamUrls.isTimeshiftUrl(url)) return
-            val positionMs = player.currentPosition
-            Log.d(TAG, "Proactive HLS refresh at ${positionMs}ms: url=${sanitizeUrlForLog(url)}")
-            player.setMediaItem(buildMediaItemForUrl(url), positionMs)
-            player.prepare()
-            player.playWhenReady = true
-            v.postDelayed(this, URL_REFRESH_INTERVAL_MS)
         }
     }
 
@@ -492,8 +471,12 @@ class PlaybackVideoFragment : Fragment() {
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(20_000)
-        httpDataSourceFactory = httpFactory
-        val dataSourceFactory = DefaultDataSource.Factory(requireContext(), httpFactory)
+        val tsFactory = TimeshiftAwareDataSourceFactory(
+            requireContext(),
+            httpFactory,
+            viewLifecycleOwner.lifecycleScope,
+        )
+        timeshiftDataSourceFactory = tsFactory
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
@@ -503,7 +486,7 @@ class PlaybackVideoFragment : Fragment() {
             )
             .build()
         val player = ExoPlayer.Builder(requireContext())
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(tsFactory))
             .setLoadControl(loadControl)
             .build()
         player.repeatMode = Player.REPEAT_MODE_OFF
@@ -522,11 +505,20 @@ class PlaybackVideoFragment : Fragment() {
                         error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
                             IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
                     if (isTimeshiftSegmentMissing) {
-                        Log.d(TAG, "Timeshift 404 → immediate URL refresh")
-                        view?.let { v ->
-                            v.removeCallbacks(urlRefreshRunnable)
-                            v.post(urlRefreshRunnable)
-                        }
+                        // Ping the manifest immediately to renew the server session, then
+                        // recover the player after a short delay — no setMediaItem() call
+                        // means no black screen.
+                        Log.d(TAG, "Timeshift 404 → session keep-alive ping + soft recover")
+                        timeshiftDataSourceFactory?.triggerImmediatePing()
+                        val savedPos = mediaPlayer?.currentPosition?.coerceAtLeast(0) ?: 0L
+                        view?.postDelayed({
+                            if (!isAdded) return@postDelayed
+                            mediaPlayer?.let { p ->
+                                p.seekTo(savedPos)
+                                p.prepare()
+                                p.playWhenReady = true
+                            }
+                        }, 2_500L)
                         return
                     }
                     if (retryWithVodContainerFallbackIfNeeded()) return
@@ -583,12 +575,19 @@ class PlaybackVideoFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         if (mediaPlayer?.isPlaying == true) startProgressTicker()
+        // Restart background session keepalive if returning to a timeshift stream.
+        // ExoPlayer won't re-fetch a VOD-style manifest on resume, so we kick the keepalive
+        // manually here rather than waiting for TimeshiftAwareDataSource to notice.
+        val url = currentPlaybackUrl
+        if (IptvStreamUrls.isTimeshiftUrl(url)) {
+            timeshiftDataSourceFactory?.startKeepAlive(url)
+        }
     }
 
     override fun onStop() {
         Log.d(TAG, "onStop → pause()")
         view?.removeCallbacks(progressTicker)
-        view?.removeCallbacks(urlRefreshRunnable)
+        timeshiftDataSourceFactory?.stop()
         mediaPlayer?.pause()
         super.onStop()
     }
@@ -596,7 +595,7 @@ class PlaybackVideoFragment : Fragment() {
     override fun onDestroyView() {
         Log.d(TAG, "onDestroyView → stop/release")
         view?.removeCallbacks(progressTicker)
-        view?.removeCallbacks(urlRefreshRunnable)
+        timeshiftDataSourceFactory?.stop()
         recordsEpgLoadJob?.cancel()
         if (::recordsColumnScrollUp.isInitialized) {
             recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
@@ -611,7 +610,7 @@ class PlaybackVideoFragment : Fragment() {
             p.release()
         }
         mediaPlayer = null
-        httpDataSourceFactory = null
+        timeshiftDataSourceFactory = null
         videoLayout.player = null
         super.onDestroyView()
     }
@@ -1491,10 +1490,13 @@ class PlaybackVideoFragment : Fragment() {
         playbackMovie.videoUrl = url
         attemptedPlaybackUrls.add(url)
         applyPanelFriendlyHttpOptions(url)
-        // Cancel any pending proactive refresh and reschedule for the new URL.
-        view?.removeCallbacks(urlRefreshRunnable)
+        // Start (or restart) the background session keepalive for timeshift streams so the
+        // server never expires the session mid-playback. For other stream types, stop any
+        // previously active keepalive.
         if (IptvStreamUrls.isTimeshiftUrl(url)) {
-            view?.postDelayed(urlRefreshRunnable, URL_REFRESH_INTERVAL_MS)
+            timeshiftDataSourceFactory?.startKeepAlive(url)
+        } else {
+            timeshiftDataSourceFactory?.stop()
         }
         Log.d(TAG, "Media set on ExoPlayer; url=${sanitizeUrlForLog(url)}")
         runCatching {
@@ -1546,7 +1548,7 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun applyPanelFriendlyHttpOptions(streamUrl: String) {
         val headers = panelFriendlyHttpHeaders(streamUrl)
-        httpDataSourceFactory
+        timeshiftDataSourceFactory?.httpDataSourceFactory
             ?.setUserAgent("Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             ?.setDefaultRequestProperties(headers)
     }
@@ -1622,8 +1624,6 @@ class PlaybackVideoFragment : Fragment() {
     private companion object {
         const val TAG = "PlaybackExo"
         const val TRICK_SLOT_STEP_MS = 30_000L
-        /** How often to proactively re-feed the .m3u8 URL for catch-up/timeshift streams. */
-        const val URL_REFRESH_INTERVAL_MS = 60_000L
         /** 24 h in ms — larger than any realistic recording, so ExoPlayer always starts at the
          *  oldest available segment of a live-type timeshift HLS stream rather than the live edge. */
         const val TIMESHIFT_LIVE_TARGET_OFFSET_MS = 24L * 60 * 60 * 1000
