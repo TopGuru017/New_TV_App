@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.animation.DecelerateInterpolator
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -136,6 +137,8 @@ class PlaybackVideoFragment : Fragment() {
     private var livePreviewStreamName: String? = null
     /** Icon URL shown in the overlay for the previewed channel. */
     private var livePreviewStreamIcon: String? = null
+    /** Increments on each channel preview while loading EPG — stale responses are ignored. */
+    private var liveEpgPreviewSeq: Int = 0
     private var liveCategoryLoadJob: Job? = null
     private lateinit var liveInfoBackCallback: OnBackPressedCallback
 
@@ -1049,7 +1052,14 @@ class PlaybackVideoFragment : Fragment() {
         livePreviewStreamName = null
         livePreviewStreamIcon = null
         liveInfoVisible = true
+        liveInfoOverlay.animate().cancel()
+        liveInfoOverlay.alpha = 0f
         liveInfoOverlay.isVisible = true
+        liveInfoOverlay.animate()
+            .alpha(1f)
+            .setDuration(220L)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
         liveInfoBackCallback.isEnabled = true
         bindLiveInfoCard()
         videoLayout.requestFocus()   // keep focus on videoLayout; its key listener drives navigation
@@ -1062,8 +1072,12 @@ class PlaybackVideoFragment : Fragment() {
         liveEpgLoadJob?.cancel()
         liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         liveInfoBackCallback.isEnabled = false
+        liveEpgRv.animate().cancel()
+        liveEpgRv.alpha = 1f
         liveInfoVisible = false
+        liveInfoOverlay.animate().cancel()
         liveInfoOverlay.isVisible = false
+        liveInfoOverlay.alpha = 1f
         livePreviewChannelIndex = liveChannelIndex
         livePreviewStreamName = null
         livePreviewStreamIcon = null
@@ -1136,38 +1150,55 @@ class PlaybackVideoFragment : Fragment() {
     private fun liveShowChannelPreview(stream: LiveStream) {
         livePreviewStreamName = stream.name
         livePreviewStreamIcon = stream.iconUrl
-        // Clear old EPG so the strip refreshes for the previewed channel
         liveEpgLoadJob?.cancel()
         liveEpgRv.removeCallbacks(liveArrowResetRunnable)
-        liveEpgListings.clear()
-        liveEpgIndex = -1
-        liveEpgAdapter.submitList(emptyList())
+        val seq = ++liveEpgPreviewSeq
+        // Keep existing EPG cards visible while the new channel's schedule loads — avoids the
+        // empty-strip flash. Dim the strip slightly until fresh data arrives.
         bindLiveInfoCard()
-        // Load EPG for the previewed channel
+        liveEpgRv.animate().cancel()
+        liveEpgRv.alpha = 0.42f
         liveEpgLoadJob = viewLifecycleOwner.lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 XtreamLiveApi.fetchArchiveEpgTable(stream.streamId)
             }
-            result.getOrNull()?.let { allListings ->
-                val now = IptvTimeUtils.nowIsraelSeconds()
-                val windowStart = now - 12 * 3600L
-                val windowEnd = now + 6 * 3600L
-                val todayListings = allListings
-                    .filter { it.endUnix > windowStart && it.startUnix < windowEnd }
-                    .sortedBy { it.startUnix }
-                if (todayListings.isNotEmpty()) {
-                    liveEpgListings.clear()
-                    liveEpgListings.addAll(todayListings)
-                    liveEpgIndex = liveEpgListings.indexOfFirst {
-                        it.startUnix <= now && now < it.endUnix
-                    }.coerceAtLeast(0)
-                    if (liveInfoVisible) bindLiveInfoCard()
-                }
+            if (!isAdded || seq != liveEpgPreviewSeq) return@launch
+            val allListings = result.getOrNull()
+            if (allListings == null) {
+                liveEpgRv.animate().alpha(1f).setDuration(180L).start()
+                return@launch
+            }
+            val now = IptvTimeUtils.nowIsraelSeconds()
+            val windowStart = now - 12 * 3600L
+            val windowEnd = now + 6 * 3600L
+            val todayListings = allListings
+                .filter { it.endUnix > windowStart && it.startUnix < windowEnd }
+                .sortedBy { it.startUnix }
+            if (!isAdded || seq != liveEpgPreviewSeq) return@launch
+            liveEpgListings.clear()
+            liveEpgListings.addAll(todayListings)
+            liveEpgIndex = if (todayListings.isNotEmpty()) {
+                todayListings.indexOfFirst {
+                    it.startUnix <= now && now < it.endUnix
+                }.coerceAtLeast(0)
+            } else {
+                -1
+            }
+            if (liveInfoVisible) {
+                bindLiveInfoCard()
+                liveEpgRv.animate().cancel()
+                liveEpgRv.alpha = 0.88f
+                liveEpgRv.animate()
+                    .alpha(1f)
+                    .setDuration(220L)
+                    .setInterpolator(DecelerateInterpolator())
+                    .start()
             }
         }
     }
 
     private fun liveSwitchToChannel(stream: LiveStream) {
+        liveEpgPreviewSeq++
         liveStreamId = stream.streamId
         liveTvArchive = stream.tvArchive
 
@@ -1204,6 +1235,8 @@ class PlaybackVideoFragment : Fragment() {
         if (liveEpgListings.isNotEmpty()) {
             liveEpgAdapter.submitList(liveEpgListings.toList(), liveEpgIndex)
             liveEpgRv.post { centerSelectedEpgCard() }
+        } else {
+            liveEpgAdapter.submitList(emptyList())
         }
     }
 

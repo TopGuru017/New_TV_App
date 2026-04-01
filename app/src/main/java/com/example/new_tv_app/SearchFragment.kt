@@ -31,6 +31,7 @@ import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.SearchHistoryStore
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import com.example.new_tv_app.iptv.XtreamVodApi
 import kotlinx.coroutines.async
@@ -89,6 +90,7 @@ class SearchFragment : Fragment() {
         loadPoster = { iv, url -> loadPoster(iv, url) },
         nameGetter = { it.name },
         posterGetter = { it.coverUrl },
+        showNewBadge = { isVodNewWithin24Hours(it.addedUnixSeconds) },
         onPick = { playSeries(it) },
         onRequestFocusNextRow = { focusFirstInRecyclerView(rvMovies) },
     )
@@ -99,6 +101,7 @@ class SearchFragment : Fragment() {
         loadPoster = { iv, url -> loadPoster(iv, url) },
         nameGetter = { it.name },
         posterGetter = { it.coverUrl },
+        showNewBadge = { isVodNewWithin24Hours(it.addedUnixSeconds) },
         onPick = { playMovie(it) },
         onRequestFocusNextRow = { false },
     )
@@ -767,6 +770,7 @@ private class SearchVodStripAdapter<T : Any>(
     private val loadPoster: (ImageView, String?) -> Unit,
     private val nameGetter: (T) -> String,
     private val posterGetter: (T) -> String?,
+    private val showNewBadge: (T) -> Boolean,
     private val onPick: (T) -> Unit,
     private val onRequestFocusNextRow: () -> Boolean,
 ) : RecyclerView.Adapter<SearchVodStripAdapter.VH>() {
@@ -795,6 +799,7 @@ private class SearchVodStripAdapter<T : Any>(
         val lastIndex = itemCount - 1
         val item = items[position]
         loadPoster(holder.poster, posterGetter(item))
+        holder.newBadge.isVisible = showNewBadge(item)
         holder.title.text = buildHighlightedTitle(nameGetter(item), q, ctx)
         holder.itemView.setOnClickListener { onPick(item) }
         holder.itemView.setOnKeyListener { _, keyCode, event ->
@@ -817,6 +822,7 @@ private class SearchVodStripAdapter<T : Any>(
 
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val poster: ImageView = itemView.findViewById(R.id.search_vod_poster)
+        val newBadge: TextView = itemView.findViewById(R.id.search_vod_new_badge)
         val title: TextView = itemView.findViewById(R.id.search_vod_title)
     }
 }

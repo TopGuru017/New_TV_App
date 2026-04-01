@@ -128,6 +128,21 @@ object XtreamVodApi {
         return JSONArray()
     }
 
+    /**
+     * Reads a Unix timestamp (seconds) from common Xtream fields (`added`, `last_modified`, …).
+     */
+    private fun readAddedUnixSeconds(o: JSONObject, vararg preferKeys: String): Long? {
+        for (k in preferKeys) {
+            if (!o.has(k) || o.isNull(k)) continue
+            val direct = o.optLong(k, 0L)
+            if (direct > 0L) return direct
+            val s = o.optString(k).trim()
+            val parsed = s.toLongOrNull() ?: continue
+            if (parsed > 0L) return parsed
+        }
+        return null
+    }
+
     private fun parseVodCategories(arr: JSONArray): List<VodCategory> {
         val out = ArrayList<VodCategory>(arr.length())
         for (i in 0 until arr.length()) {
@@ -159,6 +174,7 @@ object XtreamVodApi {
                     plot = plot,
                     categoryId = cat,
                     containerExtension = ext,
+                    addedUnixSeconds = readAddedUnixSeconds(o, "added", "last_modified", "created"),
                 )
             )
         }
@@ -195,6 +211,7 @@ object XtreamVodApi {
                     coverUrl = cover,
                     plot = plot,
                     categoryId = cat,
+                    addedUnixSeconds = readAddedUnixSeconds(o, "last_modified", "added", "created"),
                 )
             )
         }

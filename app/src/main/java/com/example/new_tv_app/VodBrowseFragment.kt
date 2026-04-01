@@ -24,6 +24,7 @@ import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.XtreamVodApi
@@ -581,6 +582,7 @@ private class VodGridAdapter(
             val m = movies[position]
             holder.name.text = m.name
             loadGridIcon(holder.icon, m.coverUrl)
+            holder.vodNewBadge.isVisible = isVodNewWithin24Hours(m.addedUnixSeconds)
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 val idx = selectedCategoryIndex()
@@ -632,6 +634,7 @@ private class VodGridAdapter(
             val s = shows[position]
             holder.name.text = s.name
             loadGridIcon(holder.icon, s.coverUrl)
+            holder.vodNewBadge.isVisible = isVodNewWithin24Hours(s.addedUnixSeconds)
             holder.itemView.setOnKeyListener { _, keyCode, event ->
                 if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
                 val idx = selectedCategoryIndex()
@@ -681,6 +684,7 @@ private class VodGridAdapter(
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
         val name: TextView = itemView.findViewById(R.id.live_channel_name)
+        val vodNewBadge: TextView = itemView.findViewById(R.id.vod_item_new_badge)
     }
 }
 

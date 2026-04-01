@@ -9,13 +9,35 @@
     android:orientation="vertical"
     android:padding="6dp">
 
-    <ImageView
-        android:id="@+id/search_vod_poster"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="@dimen/search_vod_poster_height"
-        android:contentDescription="@null"
-        android:scaleType="centerCrop"
-        tools:src="@mipmap/ic_launcher" />
+        android:layout_height="@dimen/search_vod_poster_height">
+
+        <ImageView
+            android:id="@+id/search_vod_poster"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@null"
+            android:scaleType="centerCrop"
+            tools:src="@mipmap/ic_launcher" />
+
+        <TextView
+            android:id="@+id/search_vod_new_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_margin="5dp"
+            android:background="@drawable/bg_vod_new_badge"
+            android:contentDescription="@null"
+            android:paddingHorizontal="5dp"
+            android:paddingVertical="2dp"
+            android:text="@string/vod_new_badge"
+            android:textColor="@color/sidebar_accent_cyan"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            tools:visibility="visible" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/search_vod_title"

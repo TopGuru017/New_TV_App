@@ -138,6 +138,7 @@
     <string name="vod_load_error">Could not load VOD. Check connection.</string>
     <string name="vod_badge_movie">Movie</string>
     <string name="vod_badge_series">Series</string>
+    <string name="vod_new_badge">NEW</string>
     <string name="vod_series_episode_error">Could not open episode list for this series.</string>
 
     <!-- Settings (in-app) -->

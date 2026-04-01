@@ -521,6 +521,7 @@ private class LiveChannelAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val stream = items[position]
+        holder.vodNewBadge.isVisible = false
         holder.name.text = stream.name
         val col = position % spanCount
         val catIdx = selectedCategoryIndex()
@@ -596,5 +597,6 @@ private class LiveChannelAdapter(
     class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val icon: ImageView = itemView.findViewById(R.id.live_channel_icon)
         val name: TextView = itemView.findViewById(R.id.live_channel_name)
+        val vodNewBadge: TextView = itemView.findViewById(R.id.vod_item_new_badge)
     }
 }
