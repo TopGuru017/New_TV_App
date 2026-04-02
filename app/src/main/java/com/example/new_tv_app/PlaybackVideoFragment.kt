@@ -55,10 +55,12 @@ import kotlinx.coroutines.withContext
  * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
  * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
- * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down on video toggles a bottom
- * overlay (VOD-style card + footer); DPAD up/down on the thumbnail browses listings (▲/▼ flash cyan). At the first
+ * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down on video opens a bottom
+ * overlay (VOD-style card + footer); playback keeps running while browsing listings. DPAD up/down on the thumbnail
+ * browses listings (▲/▼ flash cyan). At the first
  * listing, up does nothing; at the last, down does nothing. OK on the thumbnail applies the selection (if changed)
- * and dismisses; DPAD left/back closes. Left/right chapter strip still applies when the stream is seekable.
+ * and dismisses; DPAD left/back closes. Left/right opens the chapter strip: VOD pauses while scrubbing;
+ * timeshift/catch-up keeps playing while moving chapter cards.
  */
 @UnstableApi
 class PlaybackVideoFragment : Fragment() {
@@ -91,7 +93,7 @@ class PlaybackVideoFragment : Fragment() {
     private var posterUrl: String? = null
     /** Last duration used to build trick strip; rebuild when ExoPlayer reports a new length. */
     private var trickStripBuiltForLengthMs: Long = -1L
-    /** Seek chapter cards visible (DPAD left/right on video); playback paused while visible. */
+    /** Seek chapter cards visible (DPAD left/right on video). VOD: paused while visible; timeshift: keeps playing. */
     private var trickStripUserVisible: Boolean = false
     private var selectedTrickIndex: Int = 0
 
@@ -637,11 +639,11 @@ class PlaybackVideoFragment : Fragment() {
         updatePlaybackControlsUi()
     }
 
-    /** Seeks to [ms] while keeping the trick strip open and the player paused. */
+    /** Seeks to [ms] with the trick strip open. Pauses for VOD; timeshift/catch-up leaves play state unchanged. */
     private fun seekTrickCardPaused(ms: Long) {
         val p = mediaPlayer ?: return
         runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
-        if (p.isPlaying) p.pause()
+        if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) && p.isPlaying) p.pause()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
     }
@@ -704,7 +706,6 @@ class PlaybackVideoFragment : Fragment() {
         resetRecordsArrowGlyphColorsAndDimming()
         bindRecordsColumnPanelUi()
         loadRecordsEpgIfNeeded()
-        mediaPlayer?.pause()
         recordsColumnThumb.requestFocus()
         updatePlaybackControlsUi()
     }
@@ -936,7 +937,7 @@ class PlaybackVideoFragment : Fragment() {
         if (trickSlots.isEmpty()) return false
         trickStripUserVisible = true
         trickRv.isVisible = true
-        if (p.isPlaying) p.pause()
+        if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) && p.isPlaying) p.pause()
         syncSelectedTrickToCurrentTime()
         if (initialDelta != 0) {
             shiftSelectedTrick(initialDelta)
