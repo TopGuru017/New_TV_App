@@ -446,12 +446,13 @@ class PlaybackVideoFragment : Fragment() {
                         if (previewIdx >= 0 && previewIdx != liveChannelIndex &&
                             liveCategoryChannels.isNotEmpty()
                         ) {
-                            // User confirmed a different channel — switch now
+                            // User confirmed a different channel — hide overlay first so clearing EPG
+                            // never flashes an empty/grey strip; then switch the player.
+                            liveChannelIndex = previewIdx
                             livePreviewStreamName = null
                             livePreviewStreamIcon = null
-                            liveChannelIndex = previewIdx
-                            liveSwitchToChannel(liveCategoryChannels[previewIdx])
                             closeLiveInfoOverlay()
+                            liveSwitchToChannel(liveCategoryChannels[previewIdx])
                         } else {
                             handleLiveCardSelect()
                         }
@@ -1154,11 +1155,11 @@ class PlaybackVideoFragment : Fragment() {
         liveEpgLoadJob?.cancel()
         liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         val seq = ++liveEpgPreviewSeq
-        // Keep existing EPG cards visible while the new channel's schedule loads — avoids the
-        // empty-strip flash. Dim the strip slightly until fresh data arrives.
+        // Keep existing EPG cards visible at full opacity while the new channel's schedule loads
+        // (previous channel's row until replaced — avoids grey dimming / flicker).
         bindLiveInfoCard()
         liveEpgRv.animate().cancel()
-        liveEpgRv.alpha = 0.42f
+        liveEpgRv.alpha = 1f
         liveEpgLoadJob = viewLifecycleOwner.lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
                 XtreamLiveApi.fetchArchiveEpgTable(stream.streamId)
@@ -1166,7 +1167,10 @@ class PlaybackVideoFragment : Fragment() {
             if (!isAdded || seq != liveEpgPreviewSeq) return@launch
             val allListings = result.getOrNull()
             if (allListings == null) {
-                liveEpgRv.animate().alpha(1f).setDuration(180L).start()
+                if (liveInfoVisible) {
+                    liveEpgRv.animate().cancel()
+                    liveEpgRv.alpha = 1f
+                }
                 return@launch
             }
             val now = IptvTimeUtils.nowIsraelSeconds()
@@ -1188,12 +1192,7 @@ class PlaybackVideoFragment : Fragment() {
             if (liveInfoVisible) {
                 bindLiveInfoCard()
                 liveEpgRv.animate().cancel()
-                liveEpgRv.alpha = 0.88f
-                liveEpgRv.animate()
-                    .alpha(1f)
-                    .setDuration(220L)
-                    .setInterpolator(DecelerateInterpolator())
-                    .start()
+                liveEpgRv.alpha = 1f
             }
         }
     }
@@ -1215,6 +1214,9 @@ class PlaybackVideoFragment : Fragment() {
         trickRv.isVisible = false
         runCatching { player.stop() }
         startPlayback(player, newUrl)
+
+        liveEpgRv.animate().cancel()
+        liveEpgRv.alpha = 1f
 
         // Reset EPG data and reload for the new channel
         liveEpgLoadJob?.cancel()
