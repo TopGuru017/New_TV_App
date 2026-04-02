@@ -2,6 +2,7 @@ package com.example.new_tv_app
 
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -12,7 +13,6 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
-import androidx.core.view.doOnLayout
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -29,15 +29,7 @@ import com.example.new_tv_app.iptv.SeriesEpisode
 import com.example.new_tv_app.iptv.SeriesSeason
 import com.example.new_tv_app.iptv.XtreamVodApi
 import kotlinx.coroutines.launch
-
-/** Row view that currently has (or contains) focus; avoids [RecyclerView.findFocusedChild] API differences. */
-private fun RecyclerView.focusedRowOrNull(): View? {
-    for (i in 0 until childCount) {
-        val child = getChildAt(i)
-        if (child.hasFocus()) return child
-    }
-    return null
-}
+import java.util.Locale
 
 class VodSeriesFolderFragment : Fragment() {
 
@@ -49,25 +41,23 @@ class VodSeriesFolderFragment : Fragment() {
         requireArguments().getString(ARG_SERIES_PLOT)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
-    /** Merged series description (API + list); used for hero and as fallback when an episode has no plot. */
     private var seriesPlotForHero: String = ""
 
     private lateinit var episodesAdapter: EpisodesAdapter
-    private lateinit var seasonDropdownAdapter: SeasonDropdownAdapter
+    private lateinit var seasonsAdapter: SeasonsRowAdapter
     private val shownEpisodes = mutableListOf<SeriesEpisode>()
-    private var allSeasons = listOf<SeriesSeason>()
     private var selectedSeasonNumber: Int? = null
     private var cachedDetails: SeriesDetails? = null
-    private var sortDescending = true   // newest (highest episode number) first
+    private var sortDescending = true
 
     private lateinit var backdropImg: ImageView
     private lateinit var thumbnailImg: ImageView
     private lateinit var descriptionTv: TextView
-    private lateinit var seasonBtn: TextView
-    private lateinit var seasonDropdownOverlay: View
+    private lateinit var seasonsRv: RecyclerView
+    private lateinit var episodesRv: RecyclerView
     private lateinit var episodesEmpty: TextView
     private lateinit var favoriteBtn: ImageView
-    private var seasonDropdownOpen = false
+    private lateinit var sortBtn: ImageView
 
     private lateinit var backCallback: OnBackPressedCallback
 
@@ -88,15 +78,12 @@ class VodSeriesFolderFragment : Fragment() {
         descriptionTv = view.findViewById(R.id.series_hero_description)
         val loading = view.findViewById<ProgressBar>(R.id.series_loading)
         val error = view.findViewById<TextView>(R.id.series_error)
-        val episodesRv = view.findViewById<RecyclerView>(R.id.series_episodes_list)
+        episodesRv = view.findViewById(R.id.series_episodes_list)
         episodesEmpty = view.findViewById(R.id.series_episodes_empty)
-        seasonBtn = view.findViewById(R.id.series_season_btn)
-        seasonDropdownOverlay = view.findViewById(R.id.series_season_dropdown)
-        val seasonDropdownRv = view.findViewById<RecyclerView>(R.id.series_season_dropdown_list)
+        seasonsRv = view.findViewById(R.id.series_seasons_list)
         favoriteBtn = view.findViewById(R.id.series_btn_favorite)
-        val sortBtn = view.findViewById<ImageView>(R.id.series_btn_sort)
+        sortBtn = view.findViewById(R.id.series_btn_sort)
 
-        // Static hero bindings
         badgeTv.text = getString(R.string.vod_badge_series)
         titleTv.text = seriesName
         genreTv.text = categoryName
@@ -105,98 +92,64 @@ class VodSeriesFolderFragment : Fragment() {
         loadImage(backdropImg, seriesCover)
         loadImage(thumbnailImg, seriesCover)
 
-        // ── Favorites button ──────────────────────────────────────────────────
         refreshFavoriteIcon()
         favoriteBtn.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) bindSeriesHeroDescription()
         }
         favoriteBtn.setOnClickListener { toggleFavorite() }
         favoriteBtn.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER ||
-                    keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
-            ) {
-                toggleFavorite(); true
-            } else false
-        }
-
-        // ── Sort button (↑↓ icon, top-right) ─────────────────────────────────
-        sortBtn.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus) bindSeriesHeroDescription()
-        }
-        sortBtn.setOnClickListener { toggleSort() }
-        sortBtn.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER ||
-                    keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
-            ) {
-                toggleSort(); true
-            } else false
-        }
-
-        // ── Season dropdown ───────────────────────────────────────────────────
-        seasonDropdownAdapter = SeasonDropdownAdapter(
-            selectedSeasonProvider = { selectedSeasonNumber },
-            onSeasonPicked = { season ->
-                closeSeasonDropdown()
-                if (selectedSeasonNumber != season.seasonNumber) {
-                    bindEpisodesForSeason(season.seasonNumber)
-                }
-                seasonBtn.requestFocus()
-            },
-            onDpadUpExitDropdown = {
-                closeSeasonDropdown()
-                favoriteBtn.requestFocus()
-            },
-        )
-        seasonDropdownRv.layoutManager = LinearLayoutManager(requireContext())
-        seasonDropdownRv.adapter = seasonDropdownAdapter
-        seasonDropdownRv.itemAnimator = null
-
-        // DPAD_UP with focus on the list but no focused child (edge case) → still exit to heart
-        seasonDropdownRv.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            if (keyCode == KeyEvent.KEYCODE_DPAD_UP && seasonDropdownRv.focusedRowOrNull() == null) {
-                closeSeasonDropdown()
-                favoriteBtn.requestFocus()
-                true
-            } else {
-                false
-            }
-        }
-
-        seasonBtn.setOnFocusChangeListener { _, hasFocus ->
-            if (hasFocus) bindSeriesHeroDescription()
-        }
-        seasonBtn.setOnClickListener { toggleSeasonDropdown(view) }
-        seasonBtn.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                    toggleSeasonDropdown(view); true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    // From the season chip (dropdown closed or open): UP always goes to favorite
-                    if (seasonDropdownOpen) closeSeasonDropdown()
-                    favoriteBtn.requestFocus()
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    focusSeasonChipForNavigation()
                     true
                 }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (seasonDropdownOpen) {
-                        seasonDropdownRv.requestFocus()
-                        seasonDropdownRv.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                        true
-                    } else false
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    toggleFavorite()
+                    true
                 }
                 else -> false
             }
         }
 
-        // ── Episodes grid ─────────────────────────────────────────────────────
+        sortBtn.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) bindSeriesHeroDescription()
+        }
+        sortBtn.setOnClickListener { toggleSort() }
+        sortBtn.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    focusSeasonChipForNavigation()
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    toggleSort()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        seasonsAdapter = SeasonsRowAdapter(
+            selectedSeasonProvider = { selectedSeasonNumber },
+            onSeasonFocused = { season -> bindEpisodesForSeason(season.seasonNumber) },
+            onDpadDown = { requestFocusFirstEpisode() },
+        )
+        seasonsRv.layoutManager =
+            LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
+        seasonsRv.adapter = seasonsAdapter
+        seasonsRv.itemAnimator = null
+
         episodesAdapter = EpisodesAdapter(
             episodes = shownEpisodes,
+            gridSpan = EPISODE_GRID_SPAN,
             fallbackCoverUrl = { seriesCover },
             onEpisodeFocused = { ep ->
                 val epPlot = ep.plot?.trim().orEmpty()
@@ -205,27 +158,21 @@ class VodSeriesFolderFragment : Fragment() {
                 loadImage(backdropImg, ep.coverUrl?.takeIf { it.isNotBlank() } ?: seriesCover)
             },
             onEpisodePlay = { ep -> startEpisodePlayback(ep) },
+            onFirstRowDpadUp = { focusSeasonChipForNavigation() },
         )
-        val gridSpan = 4
-        episodesRv.layoutManager = GridLayoutManager(requireContext(), gridSpan)
+        episodesRv.layoutManager = GridLayoutManager(requireContext(), EPISODE_GRID_SPAN)
         episodesRv.adapter = episodesAdapter
         episodesRv.itemAnimator = null
 
-        // Back: close dropdown first, otherwise pop back stack
         backCallback = object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (seasonDropdownOpen) {
-                    closeSeasonDropdown()
-                    seasonBtn.requestFocus()
-                } else {
-                    parentFragmentManager.setFragmentResult(
-                        VodBrowseFragment.SERIES_FOLDER_RESULT_KEY,
-                        Bundle().apply {
-                            putString(VodBrowseFragment.SERIES_FOLDER_RESULT_SERIES_ID, seriesId)
-                        },
-                    )
-                    parentFragmentManager.popBackStack()
-                }
+                parentFragmentManager.setFragmentResult(
+                    VodBrowseFragment.SERIES_FOLDER_RESULT_KEY,
+                    Bundle().apply {
+                        putString(VodBrowseFragment.SERIES_FOLDER_RESULT_SERIES_ID, seriesId)
+                    },
+                )
+                parentFragmentManager.popBackStack()
             }
         }
         requireActivity().onBackPressedDispatcher.addCallback(viewLifecycleOwner, backCallback)
@@ -260,7 +207,47 @@ class VodSeriesFolderFragment : Fragment() {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    private fun requestFocusFirstEpisode() {
+        if (shownEpisodes.isEmpty()) return
+        episodesRv.post {
+            requestFocusEpisodeAt(0)
+        }
+    }
+
+    /** Focus the season chip that matches the current season (or first), for vertical navigation. */
+    private fun focusSeasonChipForNavigation() {
+        if (!::seasonsRv.isInitialized || !seasonsRv.isVisible || seasonsAdapter.itemCount == 0) {
+            return
+        }
+        val index = seasonsAdapter.adapterPositionForSelected(selectedSeasonNumber)
+        seasonsRv.post { requestFocusSeasonAtAdapterIndex(index) }
+    }
+
+    private fun requestFocusSeasonAtAdapterIndex(index: Int) {
+        if (index < 0 || index >= seasonsAdapter.itemCount) return
+        val vh = seasonsRv.findViewHolderForAdapterPosition(index)
+        if (vh != null) {
+            vh.itemView.requestFocus()
+        } else {
+            seasonsRv.scrollToPosition(index)
+            seasonsRv.post {
+                seasonsRv.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus()
+            }
+        }
+    }
+
+    private fun requestFocusEpisodeAt(adapterPosition: Int) {
+        if (adapterPosition < 0 || adapterPosition >= episodesAdapter.itemCount) return
+        val vh = episodesRv.findViewHolderForAdapterPosition(adapterPosition)
+        if (vh != null) {
+            vh.itemView.requestFocus()
+        } else {
+            episodesRv.scrollToPosition(adapterPosition)
+            episodesRv.post {
+                episodesRv.findViewHolderForAdapterPosition(adapterPosition)?.itemView?.requestFocus()
+            }
+        }
+    }
 
     private fun mergeSeriesPlot(details: SeriesDetails): String {
         val fromApi = details.plot?.trim().orEmpty()
@@ -337,73 +324,40 @@ class VodSeriesFolderFragment : Fragment() {
         }
     }
 
-    private fun toggleSeasonDropdown(rootView: View) {
-        if (seasonDropdownOpen) {
-            closeSeasonDropdown()
-        } else {
-            openSeasonDropdown(rootView)
-        }
-    }
-
-    private fun openSeasonDropdown(rootView: View) {
-        if (allSeasons.isEmpty()) return
-        seasonDropdownOpen = true
-        seasonBtn.text = buildSeasonLabel(selectedSeasonNumber, open = true)
-        seasonDropdownOverlay.isVisible = true
-
-        // Position overlay below the controls bar
-        seasonBtn.doOnLayout {
-            val location = IntArray(2)
-            seasonBtn.getLocationInWindow(location)
-            val rootLocation = IntArray(2)
-            rootView.getLocationInWindow(rootLocation)
-            val topPx = location[1] - rootLocation[1] + seasonBtn.height + 4
-            val lp = seasonDropdownOverlay.layoutParams as ViewGroup.LayoutParams
-            if (seasonDropdownOverlay.layoutParams is ViewGroup.MarginLayoutParams) {
-                val mlp = seasonDropdownOverlay.layoutParams as ViewGroup.MarginLayoutParams
-                mlp.topMargin = topPx
-                seasonDropdownOverlay.layoutParams = mlp
-            }
-        }
-    }
-
-    private fun closeSeasonDropdown() {
-        seasonDropdownOpen = false
-        seasonDropdownOverlay.isVisible = false
-        seasonBtn.text = buildSeasonLabel(selectedSeasonNumber, open = false)
-    }
-
-    private fun buildSeasonLabel(seasonNumber: Int?, open: Boolean): String {
-        val arrow = if (open) "  ▲" else "  ▼"
-        if (seasonNumber == null) return getString(R.string.vod_series_season_label, "—") + arrow
-        val season = allSeasons.find { it.seasonNumber == seasonNumber }
-        val label = season?.title ?: getString(R.string.vod_series_season_label, seasonNumber.toString())
-        return "$label$arrow"
-    }
-
     private fun bindSeriesDetails(details: SeriesDetails) {
-        allSeasons = details.seasons
-        seasonDropdownAdapter.submit(details.seasons)
-        if (details.seasons.isEmpty()) {
+        val seasonsWithEpisodes = details.seasons.filter { season ->
+            !details.episodesBySeason[season.seasonNumber].isNullOrEmpty()
+        }
+        seasonsAdapter.submit(seasonsWithEpisodes)
+        seasonsRv.isVisible = seasonsWithEpisodes.isNotEmpty()
+        if (seasonsWithEpisodes.isEmpty()) {
             selectedSeasonNumber = null
-            seasonBtn.text = buildSeasonLabel(null, open = false)
+            shownEpisodes.clear()
+            episodesAdapter.notifyDataSetChanged()
             episodesEmpty.isVisible = true
             return
         }
-        val first = selectedSeasonNumber ?: details.seasons.first().seasonNumber
+        val first =
+            selectedSeasonNumber?.takeIf { num ->
+                seasonsWithEpisodes.any { it.seasonNumber == num }
+            } ?: seasonsWithEpisodes.first().seasonNumber
         bindEpisodesForSeason(first)
     }
 
     private fun bindEpisodesForSeason(seasonNumber: Int) {
+        if (selectedSeasonNumber == seasonNumber && shownEpisodes.isNotEmpty()) return
+        val previousSeason = selectedSeasonNumber
         selectedSeasonNumber = seasonNumber
-        seasonBtn.text = buildSeasonLabel(seasonNumber, open = false)
-        seasonDropdownAdapter.notifyDataSetChanged()
 
         shownEpisodes.clear()
         shownEpisodes.addAll(cachedDetails?.episodesBySeason?.get(seasonNumber).orEmpty())
         reorderEpisodes()
         episodesAdapter.notifyDataSetChanged()
         episodesEmpty.isVisible = shownEpisodes.isEmpty()
+
+        // Full notifyDataSetChanged() on seasons would rebind every chip and drop D-pad focus
+        // (often to the next focusable, e.g. favorite). Only refresh selected styling.
+        seasonsAdapter.refreshSelectionUi(previousSeason, seasonNumber)
     }
 
     private fun startEpisodePlayback(ep: SeriesEpisode) {
@@ -431,6 +385,8 @@ class VodSeriesFolderFragment : Fragment() {
     }
 
     companion object {
+        private const val EPISODE_GRID_SPAN = 4
+
         private const val ARG_SERIES_ID = "series_id"
         private const val ARG_SERIES_NAME = "series_name"
         private const val ARG_SERIES_COVER = "series_cover"
@@ -457,16 +413,19 @@ class VodSeriesFolderFragment : Fragment() {
     }
 }
 
-// ── Season dropdown adapter ────────────────────────────────────────────────────
-
-private class SeasonDropdownAdapter(
+/** Horizontal season chips (same layout as VOD category strip). */
+private class SeasonsRowAdapter(
     private val selectedSeasonProvider: () -> Int?,
-    private val onSeasonPicked: (SeriesSeason) -> Unit,
-    /** DPAD_UP from any row while the season menu is open — exit to favorite. */
-    private val onDpadUpExitDropdown: () -> Unit,
-) : RecyclerView.Adapter<SeasonDropdownAdapter.VH>() {
+    private val onSeasonFocused: (SeriesSeason) -> Unit,
+    private val onDpadDown: () -> Unit,
+) : RecyclerView.Adapter<SeasonsRowAdapter.VH>() {
 
     private val seasons = mutableListOf<SeriesSeason>()
+    private var neighborScrollListener: RecyclerView.OnScrollListener? = null
+
+    companion object {
+        private val PAYLOAD_SELECTION = Any()
+    }
 
     fun submit(list: List<SeriesSeason>) {
         seasons.clear()
@@ -474,87 +433,129 @@ private class SeasonDropdownAdapter(
         notifyDataSetChanged()
     }
 
+    fun adapterPositionForSelected(seasonNumber: Int?): Int {
+        if (seasons.isEmpty()) return 0
+        if (seasonNumber == null) return 0
+        val idx = seasons.indexOfFirst { it.seasonNumber == seasonNumber }
+        return if (idx >= 0) idx else 0
+    }
+
+    /** Updates [isSelected] on chips only — avoids full rebind so focus stays on the focused chip. */
+    fun refreshSelectionUi(previousSeasonNumber: Int?, newSeasonNumber: Int) {
+        if (previousSeasonNumber != null && previousSeasonNumber != newSeasonNumber) {
+            val oldIdx = seasons.indexOfFirst { it.seasonNumber == previousSeasonNumber }
+            if (oldIdx >= 0) notifyItemChanged(oldIdx, PAYLOAD_SELECTION)
+        }
+        val newIdx = seasons.indexOfFirst { it.seasonNumber == newSeasonNumber }
+        if (newIdx >= 0) notifyItemChanged(newIdx, PAYLOAD_SELECTION)
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val tv = TextView(parent.context).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            )
-            setPadding(
-                (14 * resources.displayMetrics.density).toInt(),
-                (10 * resources.displayMetrics.density).toInt(),
-                (14 * resources.displayMetrics.density).toInt(),
-                (10 * resources.displayMetrics.density).toInt(),
-            )
-            setTextColor(ContextCompat.getColor(context, R.color.sidebar_text_primary))
-            textSize = 13f
-            isFocusable = true
-            isClickable = true
-            setBackgroundResource(R.drawable.bg_series_season_item)
+        val tv = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_series_season, parent, false) as TextView
+        if (tv.id == View.NO_ID) {
+            tv.id = View.generateViewId()
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            tv.defaultFocusHighlightEnabled = false
         }
         return VH(tv)
     }
 
     override fun getItemCount(): Int = seasons.size
 
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        if (neighborScrollListener != null) return
+        val listener = object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                wireSeasonHorizontalNeighbors(rv)
+            }
+        }
+        neighborScrollListener = listener
+        recyclerView.addOnScrollListener(listener)
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        neighborScrollListener?.let { recyclerView.removeOnScrollListener(it) }
+        neighborScrollListener = null
+        super.onDetachedFromRecyclerView(recyclerView)
+    }
+
+    override fun onBindViewHolder(holder: VH, position: Int, payloads: MutableList<Any>) {
+        if (payloads.isEmpty()) {
+            super.onBindViewHolder(holder, position, payloads)
+            return
+        }
+        if (payloads.contains(PAYLOAD_SELECTION)) {
+            val season = seasons[position]
+            holder.text.isSelected = selectedSeasonProvider() == season.seasonNumber
+        }
+    }
+
     override fun onBindViewHolder(holder: VH, position: Int) {
         val season = seasons[position]
         val selected = selectedSeasonProvider() == season.seasonNumber
-        holder.tv.text = season.title
-        holder.tv.isSelected = selected
-        if (selected) {
-            holder.tv.setTextColor(ContextCompat.getColor(holder.tv.context, R.color.sidebar_accent_cyan))
-        } else {
-            holder.tv.setTextColor(ContextCompat.getColor(holder.tv.context, R.color.sidebar_text_primary))
+        holder.text.text = season.title.uppercase(Locale.getDefault())
+        holder.text.isSelected = selected
+        holder.text.nextFocusUpId = R.id.series_btn_favorite
+        holder.text.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) onSeasonFocused(season)
         }
-        holder.tv.setOnClickListener { onSeasonPicked(season) }
-        holder.tv.setOnKeyListener { _, keyCode, event ->
+        holder.text.setOnClickListener {
+            holder.text.requestFocus()
+            onSeasonFocused(season)
+        }
+        // Do not handle DPAD_LEFT/RIGHT here — it blocks framework focus search between chips.
+        holder.text.setOnKeyListener { _, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
             when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    val pos = holder.bindingAdapterPosition
-                    if (pos == 0) {
-                        onDpadUpExitDropdown()
-                        true
-                    } else if (pos > 0) {
-                        val rv = holder.itemView.parent as? RecyclerView ?: return@setOnKeyListener false
-                        val prev = pos - 1
-                        val target = rv.findViewHolderForAdapterPosition(prev)?.itemView
-                        if (target != null) {
-                            target.requestFocus()
-                        } else {
-                            rv.scrollToPosition(prev)
-                            rv.post {
-                                rv.findViewHolderForAdapterPosition(prev)?.itemView?.requestFocus()
-                            }
-                        }
-                        true
-                    } else {
-                        false
-                    }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    onDpadDown()
+                    true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
                 -> {
-                    onSeasonPicked(season)
+                    onSeasonFocused(season)
                     true
                 }
                 else -> false
             }
         }
+        holder.itemView.post {
+            val rv = holder.itemView.parent as? RecyclerView ?: return@post
+            wireSeasonHorizontalNeighbors(rv)
+        }
     }
 
-    class VH(val tv: TextView) : RecyclerView.ViewHolder(tv)
-}
+    class VH(val text: TextView) : RecyclerView.ViewHolder(text)
 
-// ── Episodes grid adapter ─────────────────────────────────────────────────────
+    private fun wireSeasonHorizontalNeighbors(rv: RecyclerView) {
+        val lm = rv.layoutManager as? LinearLayoutManager ?: return
+        val first = lm.findFirstVisibleItemPosition()
+        val last = lm.findLastVisibleItemPosition()
+        if (first == RecyclerView.NO_POSITION || last == RecyclerView.NO_POSITION) return
+        for (pos in first..last) {
+            val vh = rv.findViewHolderForAdapterPosition(pos) ?: continue
+            val v = vh.itemView
+            val leftNeighbor = rv.findViewHolderForAdapterPosition(pos - 1)?.itemView
+            val rightNeighbor = rv.findViewHolderForAdapterPosition(pos + 1)?.itemView
+            v.nextFocusLeftId = leftNeighbor?.id?.takeIf { it != View.NO_ID } ?: View.NO_ID
+            v.nextFocusRightId = rightNeighbor?.id?.takeIf { it != View.NO_ID } ?: View.NO_ID
+            v.nextFocusUpId = R.id.series_btn_favorite
+        }
+    }
+}
 
 private class EpisodesAdapter(
     private val episodes: List<SeriesEpisode>,
+    private val gridSpan: Int,
     private val fallbackCoverUrl: () -> String?,
     private val onEpisodeFocused: (SeriesEpisode) -> Unit,
     private val onEpisodePlay: (SeriesEpisode) -> Unit,
+    private val onFirstRowDpadUp: () -> Unit,
 ) : RecyclerView.Adapter<EpisodesAdapter.VH>() {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -567,6 +568,7 @@ private class EpisodesAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val episode = episodes[position]
+        val inFirstRow = position < gridSpan
         holder.number.text = holder.itemView.context.getString(
             R.string.vod_series_episode_label, episode.episodeNumber,
         )
@@ -583,13 +585,24 @@ private class EpisodesAdapter(
         }
         holder.itemView.setOnClickListener { onEpisodePlay(episode) }
         holder.itemView.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER ||
-                    keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
-            ) {
-                onEpisodePlay(episode); true
-            } else false
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP ->
+                    if (inFirstRow) {
+                        onFirstRowDpadUp()
+                        true
+                    } else {
+                        false
+                    }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER,
+                -> {
+                    onEpisodePlay(episode)
+                    true
+                }
+                else -> false
+            }
         }
     }
 

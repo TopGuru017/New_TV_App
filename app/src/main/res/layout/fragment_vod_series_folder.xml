@@ -40,7 +40,6 @@
                 android:layout_height="match_parent"
                 android:orientation="horizontal">
 
-                <!-- Series thumbnail (portrait ratio) -->
                 <ImageView
                     android:id="@+id/series_hero_thumbnail"
                     android:layout_width="0dp"
@@ -49,7 +48,6 @@
                     android:contentDescription="@null"
                     android:scaleType="centerCrop" />
 
-                <!-- Info column -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
@@ -123,7 +121,6 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Top-right action buttons (heart + sort) -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -139,6 +136,7 @@
                     android:clickable="true"
                     android:contentDescription="@string/playback_add_to_favorites"
                     android:focusable="true"
+                    android:nextFocusRight="@id/series_btn_sort"
                     android:padding="8dp"
                     android:src="@drawable/ic_sidebar_favorite" />
 
@@ -151,37 +149,26 @@
                     android:clickable="true"
                     android:contentDescription="@string/vod_series_sort"
                     android:focusable="true"
+                    android:nextFocusLeft="@id/series_btn_favorite"
                     android:padding="8dp"
                     android:src="@drawable/ic_series_sort" />
             </LinearLayout>
         </FrameLayout>
 
-        <!-- Controls row: season dropdown + order toggle -->
-        <LinearLayout
+        <!-- Seasons: horizontal strip (same chip style as VOD categories) -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/series_seasons_list"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:layout_marginBottom="8dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/series_season_btn"
-                android:layout_width="wrap_content"
-                android:layout_height="36dp"
-                android:background="@drawable/bg_series_dropdown_btn"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minWidth="150dp"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:textColor="@color/sidebar_text_primary"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                tools:text="Season 10  ▼" />
-
-        </LinearLayout>
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:descendantFocusability="afterDescendants"
+            android:minHeight="@dimen/live_category_row_height"
+            android:overScrollMode="never"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp" />
 
         <!-- Episodes grid -->
         <FrameLayout
@@ -195,6 +182,7 @@
                 android:layout_height="match_parent"
                 android:clipChildren="false"
                 android:clipToPadding="false"
+                android:descendantFocusability="afterDescendants"
                 android:overScrollMode="never" />
 
             <TextView
@@ -207,27 +195,6 @@
                 android:textSize="14sp"
                 android:visibility="gone" />
         </FrameLayout>
-    </LinearLayout>
-
-    <!-- Season dropdown overlay (shown when season button is pressed) -->
-    <LinearLayout
-        android:id="@+id/series_season_dropdown"
-        android:layout_width="180dp"
-        android:layout_height="wrap_content"
-        android:layout_gravity="start"
-        android:layout_marginStart="28dp"
-        android:background="@drawable/bg_series_dropdown_overlay"
-        android:elevation="12dp"
-        android:orientation="vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:visibility="gone">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/series_season_dropdown_list"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:overScrollMode="never" />
     </LinearLayout>
 
     <ProgressBar
