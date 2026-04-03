@@ -23,6 +23,8 @@ import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.displayTitleWithTmdbRating
+import com.example.new_tv_app.iptv.displayTitleWithTmdbRatingStyled
 import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.LastWatchStore
@@ -101,7 +103,6 @@ class VodBrowseFragment : Fragment() {
         val error = view.findViewById<TextView>(R.id.vod_error)
 
         val backdrop = view.findViewById<ImageView>(R.id.vod_hero_backdrop)
-        val leftTitle = view.findViewById<TextView>(R.id.vod_hero_left_title)
         val badge = view.findViewById<TextView>(R.id.vod_hero_badge)
         val title = view.findViewById<TextView>(R.id.vod_hero_title)
         val genre = view.findViewById<TextView>(R.id.vod_hero_genre)
@@ -128,9 +129,8 @@ class VodBrowseFragment : Fragment() {
         fun bindHeroEmpty(categoryName: String) {
             Glide.with(backdrop).clear(backdrop)
             backdrop.setImageDrawable(null)
-            leftTitle.text = getString(R.string.vod_empty_select)
             badge.text = if (mode == MODE_SERIES) getString(R.string.vod_badge_series) else getString(R.string.vod_badge_movie)
-            title.text = ""
+            title.text = getString(R.string.vod_empty_select)
             genre.text = categoryName
             genreUnderline.isVisible = categoryName.isNotBlank()
             description.text = ""
@@ -138,9 +138,8 @@ class VodBrowseFragment : Fragment() {
 
         fun bindHeroMovie(item: VodMovieItem, categoryName: String) {
             loadCover(item.coverUrl, backdrop)
-            leftTitle.text = item.name
             badge.text = getString(R.string.vod_badge_movie)
-            title.text = item.name
+            title.text = item.displayTitleWithTmdbRatingStyled(requireContext())
             genre.text = categoryName
             genreUnderline.isVisible = categoryName.isNotBlank()
             description.text = item.plot?.trim().orEmpty().ifBlank { getString(R.string.live_no_description) }
@@ -148,7 +147,6 @@ class VodBrowseFragment : Fragment() {
 
         fun bindHeroSeries(show: SeriesShow, categoryName: String) {
             loadCover(show.coverUrl, backdrop)
-            leftTitle.text = show.name
             badge.text = getString(R.string.vod_badge_series)
             title.text = show.name
             genre.text = categoryName
@@ -225,7 +223,7 @@ class VodBrowseFragment : Fragment() {
             onSeriesFocused = { s, cat -> showSeriesDetail(s, cat) },
             onMoviePlay = { m, cat ->
                 val url = IptvStreamUrls.vodMovieUrl(m.streamId, m.containerExtension)
-                startPlayback(m.name, cat, m.coverUrl, url)
+                startPlayback(m.displayTitleWithTmdbRating(), cat, m.coverUrl, url)
             },
             onSeriesPlay = { s, cat ->
                 requireActivity().findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.let { sidebar ->
@@ -621,7 +619,7 @@ private class VodGridAdapter(
 
         if (mode == VodBrowseFragment.MODE_MOVIES) {
             val m = movies[position]
-            holder.name.text = m.name
+            holder.name.text = m.displayTitleWithTmdbRatingStyled(holder.itemView.context)
             loadGridIcon(holder.icon, m.coverUrl)
             holder.vodNewBadge.isVisible = isVodNewWithin24Hours(m.addedUnixSeconds)
             holder.itemView.setOnKeyListener { _, keyCode, event ->

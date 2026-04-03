@@ -55,6 +55,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** One ExoPlayer load try: media URL plus whether to use minimal HTTP headers (no Referer / default UA). */
+private data class PlaybackAttempt(val url: String, val bare: Boolean)
+
 /**
  * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
  * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
@@ -71,10 +74,12 @@ class PlaybackVideoFragment : Fragment() {
 
     private var mediaPlayer: ExoPlayer? = null
     private var timeshiftDataSourceFactory: TimeshiftAwareDataSourceFactory? = null
-    /** After 401/403 on VOD, retry once with no Referer and ExoPlayer default UA. */
+    /** When true, [applyPanelFriendlyHttpOptions] uses minimal headers (no Referer / default UA). */
     private var playbackHttpBareMode: Boolean = false
+    /** Seed URL for the current logical playback session (retries permute this). */
+    private var playbackSeedUrl: String = ""
     private var currentPlaybackUrl: String = ""
-    private val attemptedPlaybackUrls = linkedSetOf<String>()
+    private val attemptedPlaybackAttempts = linkedSetOf<PlaybackAttempt>()
 
     private lateinit var videoLayout: PlayerView
     private lateinit var controlsOverlay: View
@@ -237,9 +242,7 @@ class PlaybackVideoFragment : Fragment() {
             recordsDayListings.sortBy { it.startUnix }
         }
 
-        currentPlaybackUrl = url
-        attemptedPlaybackUrls.clear()
-        attemptedPlaybackUrls.add(url)
+        resetPlaybackAttemptStateForNewSeed(url)
         logPlaybackTarget(url, movie.title)
 
         videoLayout = view.findViewById(R.id.vlc_video_layout)
@@ -547,25 +550,8 @@ class PlaybackVideoFragment : Fragment() {
                         }, 2_500L)
                         return
                     }
-                    // VOD / series: some panels reject our Referer/Chrome UA; retry bare first.
-                    if (retryWithBareHttpHeadersIfNeeded(error)) return
-                    // Then try http ↔ https before container fallbacks.
-                    if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
-                        isVodOrSeriesUrl(currentPlaybackUrl)
-                    ) {
-                        if (retryWithAlternateSchemeIfNeeded()) return
-                    }
-                    if (retryWithVodContainerFallbackIfNeeded()) return
-                    if (retryWithAlternateSchemeIfNeeded()) return
-                    view.post {
-                        if (isAdded) {
-                            Toast.makeText(
-                                requireContext(),
-                                playbackErrorMessage(),
-                                Toast.LENGTH_LONG,
-                            ).show()
-                        }
-                    }
+                    if (tryNextPlaybackAttempt()) return
+                    showPlaybackUnavailableToast()
                 }
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -601,7 +587,7 @@ class PlaybackVideoFragment : Fragment() {
             },
         )
 
-        startPlayback(player, url)
+        startPlayback(player, url, bare = false)
 
         videoLayout.post { if (isAdded) videoLayout.requestFocus() }
     }
@@ -1058,7 +1044,8 @@ class PlaybackVideoFragment : Fragment() {
         trickStripUserVisible = false
         trickRv.isVisible = false
         runCatching { player.stop() }
-        startPlayback(player, url)
+        resetPlaybackAttemptStateForNewSeed(url)
+        startPlayback(player, url, bare = false)
         updatePlaybackControlsUi()
     }
 
@@ -1245,7 +1232,8 @@ class PlaybackVideoFragment : Fragment() {
         trickStripUserVisible = false
         trickRv.isVisible = false
         runCatching { player.stop() }
-        startPlayback(player, newUrl)
+        resetPlaybackAttemptStateForNewSeed(newUrl)
+        startPlayback(player, newUrl, bare = false)
 
         liveEpgRv.animate().cancel()
         liveEpgRv.alpha = 1f
@@ -1553,11 +1541,24 @@ class PlaybackVideoFragment : Fragment() {
         return if (l != C.TIME_UNSET && l > 0L) l else 0L
     }
 
-    private fun startPlayback(player: ExoPlayer, url: String) {
-        if (url != currentPlaybackUrl) playbackHttpBareMode = false
+    private fun resetPlaybackAttemptStateForNewSeed(url: String) {
+        val t = url.trim()
+        if (t.isEmpty()) return
+        playbackSeedUrl = t
+        attemptedPlaybackAttempts.clear()
+        playbackHttpBareMode = false
+    }
+
+    private fun startPlayback(player: ExoPlayer, url: String, bare: Boolean) {
+        val attempt = PlaybackAttempt(url, bare)
+        if (attempt in attemptedPlaybackAttempts) {
+            Log.w(TAG, "Skip duplicate playback attempt bare=${attempt.bare} url=${sanitizeUrlForLog(attempt.url)}")
+            return
+        }
+        attemptedPlaybackAttempts.add(attempt)
+        playbackHttpBareMode = bare
         currentPlaybackUrl = url
         playbackMovie.videoUrl = url
-        attemptedPlaybackUrls.add(url)
         applyPanelFriendlyHttpOptions(url)
         // Start (or restart) the background session keepalive for timeshift streams so the
         // server never expires the session mid-playback. For other stream types, stop any
@@ -1567,24 +1568,109 @@ class PlaybackVideoFragment : Fragment() {
         } else {
             timeshiftDataSourceFactory?.stop()
         }
-        Log.d(TAG, "Media set on ExoPlayer; url=${sanitizeUrlForLog(url)}")
+        Log.d(TAG, "Media set on ExoPlayer; bare=$bare url=${sanitizeUrlForLog(url)}")
         runCatching {
+            runCatching { player.stop() }
             player.setMediaItem(buildMediaItemForUrl(url))
             player.prepare()
             player.playWhenReady = true
         }.onFailure { err ->
             Log.e(TAG, "Failed to start playback for ${sanitizeUrlForLog(url)}", err)
-            if (retryWithAlternateSchemeIfNeeded()) return
-            if (retryWithVodContainerFallbackIfNeeded()) return
-            if (retryWithAlternateSchemeIfNeeded()) return
-            view?.post {
-                if (isAdded) {
-                    Toast.makeText(
-                        requireContext(),
-                        playbackErrorMessage(),
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
+            if (!tryNextPlaybackAttempt()) showPlaybackUnavailableToast()
+        }
+    }
+
+    /**
+     * Tries the next (url × headers) combination from [orderedPlaybackAttempts] for this seed.
+     * @return true if another attempt was started.
+     */
+    private fun tryNextPlaybackAttempt(): Boolean {
+        val next = computeNextPlaybackAttempt() ?: return false
+        val p = mediaPlayer ?: return false
+        Log.w(
+            TAG,
+            "Playback retry bare=${next.bare} url=${sanitizeUrlForLog(next.url)}",
+        )
+        startPlayback(p, next.url, next.bare)
+        return true
+    }
+
+    private fun computeNextPlaybackAttempt(): PlaybackAttempt? {
+        val seed = playbackSeedUrl.ifEmpty { currentPlaybackUrl }.trim()
+        if (seed.isEmpty()) return null
+        val order = orderedPlaybackAttempts(seed)
+        return order.firstOrNull { it !in attemptedPlaybackAttempts }
+    }
+
+    /** Exhaustive permutation order: every candidate URL × (panel headers, then bare). */
+    private fun orderedPlaybackAttempts(seedUrl: String): List<PlaybackAttempt> {
+        val urls = if (isVodOrSeriesUrl(seedUrl)) {
+            allVodSeriesCandidateUrls(seedUrl)
+        } else {
+            buildList {
+                add(seedUrl)
+                IptvStreamUrls.alternateHttpScheme(seedUrl)?.let { add(it) }
+            }
+        }
+        val out = ArrayList<PlaybackAttempt>(urls.size * 2)
+        for (u in urls) {
+            out.add(PlaybackAttempt(u, false))
+            out.add(PlaybackAttempt(u, true))
+        }
+        return out
+    }
+
+    /**
+     * Collects seed, http/https mirror, and every container extension variant (mp4, m3u8, ts, mkv).
+     */
+    private fun allVodSeriesCandidateUrls(seedUrl: String): List<String> {
+        val ordered = mutableListOf<String>()
+        val seen = mutableSetOf<String>()
+        fun add(u: String) {
+            if (seen.add(u)) ordered.add(u)
+        }
+        add(seedUrl)
+        IptvStreamUrls.alternateHttpScheme(seedUrl)?.let { add(it) }
+        var i = 0
+        while (i < ordered.size) {
+            val u = ordered[i]
+            i++
+            var n = nextVodUrlFrom(u, seen)
+            while (n != null) {
+                add(n)
+                IptvStreamUrls.alternateHttpScheme(n)?.let { add(it) }
+                n = nextVodUrlFrom(n, seen)
+            }
+        }
+        return ordered
+    }
+
+    private fun nextVodUrlFrom(url: String, already: Set<String>): String? {
+        val u = Uri.parse(url)
+        val path = u.path ?: return null
+        val file = path.substringAfterLast('/', "")
+        val dot = file.lastIndexOf('.')
+        if (dot <= 0 || dot >= file.lastIndex) return null
+        val baseName = file.substring(0, dot)
+        val currentExt = file.substring(dot + 1).lowercase(Locale.US)
+        val fallbackOrder = listOf("mp4", "m3u8", "ts", "mkv")
+        for (ext in fallbackOrder) {
+            if (ext == currentExt) continue
+            val candidatePath = path.removeSuffix(file) + "$baseName.$ext"
+            val candidate = u.buildUpon().path(candidatePath).build().toString()
+            if (!already.contains(candidate)) return candidate
+        }
+        return null
+    }
+
+    private fun showPlaybackUnavailableToast() {
+        view?.post {
+            if (isAdded) {
+                Toast.makeText(
+                    requireContext(),
+                    R.string.playback_not_available_now,
+                    Toast.LENGTH_LONG,
+                ).show()
             }
         }
     }
@@ -1633,88 +1719,15 @@ class PlaybackVideoFragment : Fragment() {
             ?.setDefaultRequestProperties(emptyMap())
     }
 
-    /**
-     * Panels that used to play with plain ExoPlayer may return 401/403 when Referer or a fake
-     * Chrome UA is present — replay the same item with default Media3 behavior.
-     */
-    private fun retryWithBareHttpHeadersIfNeeded(error: PlaybackException): Boolean {
-        if (!isVodOrSeriesUrl(currentPlaybackUrl)) return false
-        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return false
-        if (!isHttpStatusCode(error, 403) && !isHttpStatusCode(error, 401)) return false
-        if (playbackHttpBareMode) return false
-        val p = mediaPlayer ?: return false
-        playbackHttpBareMode = true
-        applyBareHttpOptions()
-        Log.w(TAG, "Retrying VOD/series with minimal HTTP headers (no Referer / default UA)")
-        runCatching {
-            p.prepare()
-            p.playWhenReady = true
-        }.onFailure { Log.e(TAG, "bare retry prepare failed", it) }
-        return true
-    }
-
-    private fun retryWithVodContainerFallbackIfNeeded(): Boolean {
-        if (!isVodOrSeriesUrl(currentPlaybackUrl)) return false
-        val next = nextVodFallbackUrl(currentPlaybackUrl) ?: return false
-        val player = mediaPlayer ?: return false
-        Log.w(
-            TAG,
-            "Retrying playback with VOD container fallback: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(next)}",
-        )
-        startPlayback(player, next)
-        return true
-    }
-
-    private fun retryWithAlternateSchemeIfNeeded(): Boolean {
-        val alt = alternateScheme(currentPlaybackUrl)
-            ?.takeIf { !attemptedPlaybackUrls.contains(it) }
-            ?: return false
-        val player = mediaPlayer ?: return false
-        Log.w(
-            TAG,
-            "Retrying playback with alternate scheme: from=${sanitizeUrlForLog(currentPlaybackUrl)} to=${sanitizeUrlForLog(alt)}",
-        )
-        startPlayback(player, alt)
-        return true
-    }
-
-    private fun alternateScheme(url: String): String? =
-        IptvStreamUrls.alternateHttpScheme(url)
-
     private fun isVodOrSeriesUrl(url: String): Boolean {
         val path = Uri.parse(url).path.orEmpty()
         return path.contains("/movie/", ignoreCase = true) || path.contains("/series/", ignoreCase = true)
-    }
-
-    private fun nextVodFallbackUrl(url: String): String? {
-        val u = Uri.parse(url)
-        val path = u.path ?: return null
-        val file = path.substringAfterLast('/', "")
-        val dot = file.lastIndexOf('.')
-        if (dot <= 0 || dot >= file.lastIndex) return null
-        val baseName = file.substring(0, dot)
-        val currentExt = file.substring(dot + 1).lowercase(Locale.US)
-        val fallbackOrder = listOf("mp4", "m3u8", "ts")
-        for (ext in fallbackOrder) {
-            if (ext == currentExt) continue
-            val candidatePath = path.removeSuffix(file) + "$baseName.$ext"
-            val candidate = u.buildUpon().path(candidatePath).build().toString()
-            if (!attemptedPlaybackUrls.contains(candidate)) return candidate
-        }
-        return null
     }
 
     private fun sanitizeUrlForLog(url: String): String {
         val u = Uri.parse(url)
         return "${u.scheme}://${u.host}${u.path.orEmpty()}"
     }
-
-    /** Returns a context-appropriate error message for a playback failure. */
-    private fun playbackErrorMessage(): String =
-        if (IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl))
-            getString(R.string.live_catchup_record_unavailable)
-        else
-            getString(R.string.playback_error_message, getString(R.string.error_fragment_message))
 
     private companion object {
         const val TAG = "PlaybackExo"

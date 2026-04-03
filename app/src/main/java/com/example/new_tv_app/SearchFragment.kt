@@ -31,6 +31,7 @@ import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.SearchHistoryStore
 import com.example.new_tv_app.iptv.SeriesShow
 import com.example.new_tv_app.iptv.VodMovieItem
+import com.example.new_tv_app.iptv.displayTitleWithTmdbRating
 import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import com.example.new_tv_app.iptv.XtreamVodApi
@@ -611,7 +612,7 @@ class SearchFragment : Fragment() {
         val url = IptvStreamUrls.vodMovieUrl(m.streamId, m.containerExtension)
         val movie = Movie(
             id = m.streamId.hashCode().toLong(),
-            title = m.name,
+            title = m.displayTitleWithTmdbRating(),
             description = getString(R.string.search_badge_movie),
             backgroundImageUrl = m.coverUrl,
             cardImageUrl = m.coverUrl,

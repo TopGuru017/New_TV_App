@@ -1,5 +1,12 @@
 package com.example.new_tv_app.iptv
 
+import android.content.Context
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
+import androidx.core.content.ContextCompat
+import com.example.new_tv_app.R
+import java.util.Locale
+
 data class VodCategory(
     val id: String,
     val name: String,
@@ -12,9 +19,32 @@ data class VodMovieItem(
     val plot: String?,
     val categoryId: String?,
     val containerExtension: String,
+    /** Xtream `rating` / `rating_5based` when present (panel-sourced, often TMDB 0–10). */
+    val tmdbRating: Float? = null,
     /** Xtream `added` (Unix seconds), when present — used for “new” badge. */
     val addedUnixSeconds: Long? = null,
 )
+
+/** Title line for UI: `TMDB 6.8 Name` when [VodMovieItem.tmdbRating] is set, else plain [VodMovieItem.name]. */
+fun VodMovieItem.displayTitleWithTmdbRating(): String {
+    val r = tmdbRating ?: return name
+    return String.format(Locale.US, "TMDB %.1f %s", r, name)
+}
+
+/** Same as [displayTitleWithTmdbRating] but colors the `TMDB x.x ` prefix with [R.color.vod_tmdb_rating]. */
+fun VodMovieItem.displayTitleWithTmdbRatingStyled(context: Context): CharSequence {
+    val r = tmdbRating ?: return name
+    val prefix = String.format(Locale.US, "TMDB %.1f ", r)
+    val full = prefix + name
+    val sp = SpannableString(full)
+    sp.setSpan(
+        ForegroundColorSpan(ContextCompat.getColor(context, R.color.vod_tmdb_rating)),
+        0,
+        prefix.length,
+        SpannableString.SPAN_EXCLUSIVE_EXCLUSIVE,
+    )
+    return sp
+}
 
 data class SeriesCategory(
     val id: String,

@@ -162,6 +162,19 @@ object XtreamVodApi {
         return out
     }
 
+    private fun readTmdbRatingFromVod(o: JSONObject): Float? {
+        val ratingStr = o.optString("rating").trim()
+        if (ratingStr.isNotEmpty() && !ratingStr.equals("N/A", ignoreCase = true) && ratingStr != "null") {
+            val f = ratingStr.toFloatOrNull()
+            if (f != null && f > 0f) return f.coerceIn(0f, 10f)
+        }
+        val ratingNum = o.optDouble("rating", Double.NaN)
+        if (!ratingNum.isNaN() && ratingNum > 0.0) return ratingNum.toFloat().coerceIn(0f, 10f)
+        val five = o.optDouble("rating_5based", Double.NaN)
+        if (!five.isNaN() && five > 0.0) return (five * 2.0).toFloat().coerceIn(0f, 10f)
+        return null
+    }
+
     private fun parseVodStreams(arr: JSONArray): List<VodMovieItem> {
         val out = ArrayList<VodMovieItem>(arr.length())
         for (i in 0 until arr.length()) {
@@ -181,6 +194,7 @@ object XtreamVodApi {
                     plot = plot,
                     categoryId = cat,
                     containerExtension = ext,
+                    tmdbRating = readTmdbRatingFromVod(o),
                     addedUnixSeconds = readAddedUnixSeconds(o, "added", "last_modified", "created"),
                 )
             )

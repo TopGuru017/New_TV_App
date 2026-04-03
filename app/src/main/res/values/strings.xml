@@ -15,6 +15,7 @@
 
     <string name="playback_error_no_media">Nothing to play</string>
     <string name="playback_error_message">Playback failed: %1$s</string>
+    <string name="playback_not_available_now">This is not available now</string>
     <string name="playback_live">LIVE</string>
     <string name="playback_cd_trick_seek">Seek to %1$s</string>
     <string name="playback_records_cd_previous_programme">Previous programme</string>
