@@ -66,8 +66,8 @@ private data class PlaybackAttempt(val url: String, val bare: Boolean)
  * overlay (VOD-style card + footer); playback keeps running while browsing listings. DPAD up/down on the thumbnail
  * browses listings (▲/▼ flash cyan). At the first
  * listing, up does nothing; at the last, down does nothing. OK on the thumbnail applies the selection (if changed)
- * and dismisses; DPAD left/back closes. Left/right opens the chapter strip: VOD pauses while scrubbing;
- * timeshift/catch-up keeps playing while moving chapter cards.
+ * and dismisses; DPAD left/back closes. Left/right opens the chapter strip; moving between chapter cards
+ * keeps playback running (same as timeshift/catch-up).
  */
 @UnstableApi
 class PlaybackVideoFragment : Fragment() {
@@ -104,7 +104,7 @@ class PlaybackVideoFragment : Fragment() {
     private var posterUrl: String? = null
     /** Last duration used to build trick strip; rebuild when ExoPlayer reports a new length. */
     private var trickStripBuiltForLengthMs: Long = -1L
-    /** Seek chapter cards visible (DPAD left/right on video). VOD: paused while visible; timeshift: keeps playing. */
+    /** Seek chapter cards visible (DPAD left/right on video). Playback keeps running while browsing chapters. */
     private var trickStripUserVisible: Boolean = false
     private var selectedTrickIndex: Int = 0
 
@@ -450,7 +450,7 @@ class PlaybackVideoFragment : Fragment() {
                         shiftSelectedTrick(delta)
                     }
                     val slot = trickSlots.getOrNull(selectedTrickIndex)
-                    if (slot != null) seekTrickCardPaused(slot.startMs)
+                    if (slot != null) seekTrickCard(slot.startMs)
                     true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
@@ -654,11 +654,10 @@ class PlaybackVideoFragment : Fragment() {
         updatePlaybackControlsUi()
     }
 
-    /** Seeks to [ms] with the trick strip open. Pauses for VOD; timeshift/catch-up leaves play state unchanged. */
-    private fun seekTrickCardPaused(ms: Long) {
+    /** Seeks to [ms] with the trick strip open; does not pause (matches records / timeshift behaviour). */
+    private fun seekTrickCard(ms: Long) {
         val p = mediaPlayer ?: return
         runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
-        if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) && p.isPlaying) p.pause()
         videoLayout.requestFocus()
         updatePlaybackControlsUi()
     }
@@ -956,7 +955,6 @@ class PlaybackVideoFragment : Fragment() {
         if (trickSlots.isEmpty()) return false
         trickStripUserVisible = true
         trickRv.isVisible = true
-        if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) && p.isPlaying) p.pause()
         syncSelectedTrickToCurrentTime()
         if (initialDelta != 0) {
             shiftSelectedTrick(initialDelta)
@@ -999,7 +997,7 @@ class PlaybackVideoFragment : Fragment() {
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
                     if (openTrickStripForSeeking(initialDelta = delta)) {
                         val slot = trickSlots.getOrNull(selectedTrickIndex)
-                        if (slot != null) seekTrickCardPaused(slot.startMs)
+                        if (slot != null) seekTrickCard(slot.startMs)
                     } else {
                         closeRecordsColumnAndResume()
                     }

@@ -31,11 +31,12 @@ object IptvTimeUtils {
 
     fun nowIsraelSeconds(): Long = System.currentTimeMillis() / 1000L
 
-    /** Archive rows are listed only after the programme end is strictly more than this many seconds ago. */
-    const val RECORDS_MIN_AGE_AFTER_END_SEC: Long = 12L * 3600L
-
+    /**
+     * Archive rows are listed once the programme has ended (EPG end time is at or before [nowUnix]).
+     * This keeps the list aligned with “latest available” catch-up relative to the current clock.
+     */
     fun eligibleForRecordsList(programEndUnix: Long, nowUnix: Long = nowIsraelSeconds()): Boolean =
-        nowUnix - programEndUnix > RECORDS_MIN_AGE_AFTER_END_SEC
+        nowUnix >= programEndUnix
 
     /** Xtream timeshift path segment, e.g. `2026-03-22:04-20`. Uses server TZ. */
     fun formatTimeshiftStartIsrael(unixSeconds: Long): String {

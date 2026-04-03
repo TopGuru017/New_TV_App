@@ -44,7 +44,7 @@ private fun requestFocusRecyclerChildAfterScroll(rv: RecyclerView, adapterPositi
     }
 }
 
-/** Calendar days that have at least one catch-up row (same overlap + 12h rules as the programme list). */
+/** Calendar days that have at least one catch-up row (same overlap + ended-before-now rules as the programme list). */
 private fun daySlotsHavingCatchUp(
     calendarDays: List<RecordsDaySlot>,
     listings: List<EpgListing>,
