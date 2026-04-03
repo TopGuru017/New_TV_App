@@ -10,6 +10,31 @@ import java.util.Locale
  */
 object IptvStreamUrls {
 
+    /**
+     * Same host/path with the opposite scheme (http ↔ https). Used when the panel serves
+     * media on one scheme but API or stored [IptvCredentials.preferredBaseUrl] used the other.
+     */
+    fun alternateHttpScheme(url: String): String? = when {
+        url.startsWith("https://", ignoreCase = true) ->
+            "http://${url.removePrefix("https://")}"
+        url.startsWith("http://", ignoreCase = true) ->
+            "https://${url.removePrefix("http://")}"
+        else -> null
+    }
+
+    /**
+     * Simple Referer / Origin matching the stream host (same as early app versions). Some
+     * panels reject synthetic browser UAs or mismatched Referer — callers may strip headers on 403.
+     */
+    fun simpleRefererOriginForStreamUrl(streamUrl: String): Pair<String, String>? {
+        val u = Uri.parse(streamUrl.trim())
+        val scheme = u.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val host = u.host ?: return null
+        val root = "$scheme://$host/"
+        return root to root
+    }
+
     fun liveStreamUrl(streamId: String): String {
         val base = IptvCredentials.preferredBaseUrl()
         val u = Uri.encode(IptvCredentials.usernameRaw(), "/")

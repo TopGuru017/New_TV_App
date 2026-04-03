@@ -25,7 +25,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException
 import com.example.new_tv_app.playback.AacFriendlyMediaCodecSelector
 import com.example.new_tv_app.playback.TimeshiftAwareDataSourceFactory
 import androidx.media3.exoplayer.DefaultLoadControl
@@ -69,6 +71,8 @@ class PlaybackVideoFragment : Fragment() {
 
     private var mediaPlayer: ExoPlayer? = null
     private var timeshiftDataSourceFactory: TimeshiftAwareDataSourceFactory? = null
+    /** After 401/403 on VOD, retry once with no Referer and ExoPlayer default UA. */
+    private var playbackHttpBareMode: Boolean = false
     private var currentPlaybackUrl: String = ""
     private val attemptedPlaybackUrls = linkedSetOf<String>()
 
@@ -524,7 +528,8 @@ class PlaybackVideoFragment : Fragment() {
                     // playback from the saved position.
                     val isTimeshiftSegmentMissing =
                         error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
-                            IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl)
+                            IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) &&
+                            isHttpStatusCode(error, 404)
                     if (isTimeshiftSegmentMissing) {
                         // Ping the manifest immediately to renew the server session, then
                         // recover the player after a short delay — no setMediaItem() call
@@ -541,6 +546,14 @@ class PlaybackVideoFragment : Fragment() {
                             }
                         }, 2_500L)
                         return
+                    }
+                    // VOD / series: some panels reject our Referer/Chrome UA; retry bare first.
+                    if (retryWithBareHttpHeadersIfNeeded(error)) return
+                    // Then try http ↔ https before container fallbacks.
+                    if (error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+                        isVodOrSeriesUrl(currentPlaybackUrl)
+                    ) {
+                        if (retryWithAlternateSchemeIfNeeded()) return
                     }
                     if (retryWithVodContainerFallbackIfNeeded()) return
                     if (retryWithAlternateSchemeIfNeeded()) return
@@ -1541,6 +1554,7 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun startPlayback(player: ExoPlayer, url: String) {
+        if (url != currentPlaybackUrl) playbackHttpBareMode = false
         currentPlaybackUrl = url
         playbackMovie.videoUrl = url
         attemptedPlaybackUrls.add(url)
@@ -1560,6 +1574,7 @@ class PlaybackVideoFragment : Fragment() {
             player.playWhenReady = true
         }.onFailure { err ->
             Log.e(TAG, "Failed to start playback for ${sanitizeUrlForLog(url)}", err)
+            if (retryWithAlternateSchemeIfNeeded()) return
             if (retryWithVodContainerFallbackIfNeeded()) return
             if (retryWithAlternateSchemeIfNeeded()) return
             view?.post {
@@ -1602,10 +1617,40 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun applyPanelFriendlyHttpOptions(streamUrl: String) {
+        if (playbackHttpBareMode) {
+            applyBareHttpOptions()
+            return
+        }
         val headers = panelFriendlyHttpHeaders(streamUrl)
         timeshiftDataSourceFactory?.httpDataSourceFactory
             ?.setUserAgent("Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             ?.setDefaultRequestProperties(headers)
+    }
+
+    private fun applyBareHttpOptions() {
+        timeshiftDataSourceFactory?.httpDataSourceFactory
+            ?.setUserAgent(Util.getUserAgent(requireContext(), getString(R.string.app_name)))
+            ?.setDefaultRequestProperties(emptyMap())
+    }
+
+    /**
+     * Panels that used to play with plain ExoPlayer may return 401/403 when Referer or a fake
+     * Chrome UA is present — replay the same item with default Media3 behavior.
+     */
+    private fun retryWithBareHttpHeadersIfNeeded(error: PlaybackException): Boolean {
+        if (!isVodOrSeriesUrl(currentPlaybackUrl)) return false
+        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return false
+        if (!isHttpStatusCode(error, 403) && !isHttpStatusCode(error, 401)) return false
+        if (playbackHttpBareMode) return false
+        val p = mediaPlayer ?: return false
+        playbackHttpBareMode = true
+        applyBareHttpOptions()
+        Log.w(TAG, "Retrying VOD/series with minimal HTTP headers (no Referer / default UA)")
+        runCatching {
+            p.prepare()
+            p.playWhenReady = true
+        }.onFailure { Log.e(TAG, "bare retry prepare failed", it) }
+        return true
     }
 
     private fun retryWithVodContainerFallbackIfNeeded(): Boolean {
@@ -1633,13 +1678,8 @@ class PlaybackVideoFragment : Fragment() {
         return true
     }
 
-    private fun alternateScheme(url: String): String? = when {
-        url.startsWith("https://", ignoreCase = true) ->
-            "http://${url.removePrefix("https://")}"
-        url.startsWith("http://", ignoreCase = true) ->
-            "https://${url.removePrefix("http://")}"
-        else -> null
-    }
+    private fun alternateScheme(url: String): String? =
+        IptvStreamUrls.alternateHttpScheme(url)
 
     private fun isVodOrSeriesUrl(url: String): Boolean {
         val path = Uri.parse(url).path.orEmpty()
@@ -1705,6 +1745,15 @@ class PlaybackVideoFragment : Fragment() {
                 "Referer" to origin,
                 "Origin" to origin,
             )
+        }
+
+        private fun isHttpStatusCode(error: PlaybackException, code: Int): Boolean {
+            var t: Throwable? = error.cause
+            while (t != null) {
+                if (t is InvalidResponseCodeException && t.responseCode == code) return true
+                t = t.cause
+            }
+            return false
         }
 
         fun logPlaybackTarget(url: String, title: String?) {

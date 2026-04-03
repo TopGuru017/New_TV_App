@@ -94,6 +94,10 @@ class TimeshiftAwareDataSourceFactory(
                 "User-Agent",
                 "Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
+            IptvStreamUrls.simpleRefererOriginForStreamUrl(url)?.let { (referer, origin) ->
+                conn.setRequestProperty("Referer", referer)
+                conn.setRequestProperty("Origin", origin)
+            }
             conn.connect()
             // Read at least one byte so the server registers a complete request and creates
             // a fresh session; just connecting is not always sufficient.
