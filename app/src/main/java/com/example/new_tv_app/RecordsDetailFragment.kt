@@ -44,13 +44,32 @@ private fun requestFocusRecyclerChildAfterScroll(rv: RecyclerView, adapterPositi
     }
 }
 
-/** Catch-up UI: channel bar, last 7 Israel calendar days, vertical programme list with timeshift playback. */
+/** Calendar days that have at least one catch-up row (same overlap + 12h rules as the programme list). */
+private fun daySlotsHavingCatchUp(
+    calendarDays: List<RecordsDaySlot>,
+    listings: List<EpgListing>,
+    nowUnix: Long,
+): List<RecordsDaySlot> =
+    calendarDays.filter { slot ->
+        val dayStart = slot.startUnix
+        val dayEnd = IptvTimeUtils.endOfDayIsraelSeconds(dayStart)
+        listings.any { listing ->
+            listing.startUnix < dayEnd &&
+                listing.endUnix > dayStart &&
+                IptvTimeUtils.eligibleForRecordsList(listing.endUnix, nowUnix)
+        }
+    }
+
+/** Catch-up UI: channel bar, date strip (only days that have catch-up), vertical programme list. */
 class RecordsDetailFragment : Fragment() {
 
     private var barStreams: List<LiveStream> = emptyList()
     private var selectedStreamId: String = ""
     private var allListings: List<EpgListing> = emptyList()
-    private lateinit var daySlots: List<RecordsDaySlot>
+    /** Fixed 7-day window used to bound the archive EPG request. */
+    private lateinit var calendarDaySlots: List<RecordsDaySlot>
+    /** Days shown in the date strip (subset of [calendarDaySlots] that have catch-up). */
+    private var daySlots: List<RecordsDaySlot> = emptyList()
     private var selectedDayIndex: Int = 0
 
     private var epgJob: Job? = null
@@ -151,7 +170,8 @@ class RecordsDetailFragment : Fragment() {
             }
         }
 
-        daySlots = IptvTimeUtils.lastSevenDaySlotsIsrael()
+        calendarDaySlots = IptvTimeUtils.lastSevenDaySlotsIsrael()
+        daySlots = emptyList()
         selectedStreamId = requireArguments().getString(ARG_STREAM_ID).orEmpty()
 
         fun selectedStream(): LiveStream? = barStreams.find { it.streamId == selectedStreamId }
@@ -184,7 +204,9 @@ class RecordsDetailFragment : Fragment() {
             val slot = daySlots[selectedDayIndex]
             val dayStart = slot.startUnix
             val dayEnd = IptvTimeUtils.endOfDayIsraelSeconds(dayStart)
+            val now = IptvTimeUtils.nowIsraelSeconds()
             var list = allListings.filter { it.startUnix < dayEnd && it.endUnix > dayStart }
+                .filter { IptvTimeUtils.eligibleForRecordsList(it.endUnix, now) }
             list = if (newestFirst()) {
                 list.sortedByDescending { it.startUnix }
             } else {
@@ -243,16 +265,24 @@ class RecordsDetailFragment : Fragment() {
                 if (!isAdded) return@launch
                 result.fold(
                     onSuccess = { listings ->
-                        val oldestDay = daySlots.last().startUnix
-                        val newestEnd = IptvTimeUtils.endOfDayIsraelSeconds(daySlots.first().startUnix)
+                        val oldestDay = calendarDaySlots.last().startUnix
+                        val newestEnd =
+                            IptvTimeUtils.endOfDayIsraelSeconds(calendarDaySlots.first().startUnix)
                         allListings = listings.filter {
                             it.endUnix > oldestDay && it.startUnix < newestEnd
                         }
+                        val now = IptvTimeUtils.nowIsraelSeconds()
+                        daySlots = daySlotsHavingCatchUp(calendarDaySlots, allListings, now)
+                        selectedDayIndex = 0
+                        datesAdapter.submit(daySlots)
                         error.isVisible = false
                         refreshProgramList()
                     },
                     onFailure = {
                         allListings = emptyList()
+                        daySlots = emptyList()
+                        selectedDayIndex = 0
+                        datesAdapter.submit(emptyList())
                         error.text = getString(R.string.records_epg_error)
                         error.isVisible = true
                         refreshProgramList()
@@ -288,7 +318,12 @@ class RecordsDetailFragment : Fragment() {
                 lastProgramFocusIndex = pos
             },
             onDpadLeftFromProgram = {
-                focusRecyclerPosition(datesRv, selectedDayIndex.coerceIn(0, daySlots.size - 1))
+                if (daySlots.isNotEmpty()) {
+                    focusRecyclerPosition(
+                        datesRv,
+                        selectedDayIndex.coerceIn(0, daySlots.lastIndex),
+                    )
+                }
                 true
             },
             onDpadUpFromFirstProgram = {
@@ -299,7 +334,6 @@ class RecordsDetailFragment : Fragment() {
         )
 
         datesAdapter = RecordsDatesAdapter(
-            days = daySlots,
             selectedIndexProvider = { selectedDayIndex },
             onDayPicked = { idx ->
                 if (selectedDayIndex == idx) return@RecordsDatesAdapter
@@ -323,6 +357,7 @@ class RecordsDetailFragment : Fragment() {
             },
             sidebarFocusLeftId = R.id.row_records,
         )
+        datesAdapter.submit(daySlots)
 
         fun focusFirstProgramOrDates() {
             val n = programsAdapter.itemCount
@@ -340,10 +375,10 @@ class RecordsDetailFragment : Fragment() {
                         focusRecyclerPosition(programsRv, 0, attemptsRemaining = 40)
                     }
                 }
-            } else {
+            } else if (daySlots.isNotEmpty()) {
                 focusRecyclerPosition(
                     datesRv,
-                    selectedDayIndex.coerceIn(0, daySlots.size - 1),
+                    selectedDayIndex.coerceIn(0, daySlots.lastIndex),
                 )
             }
         }
@@ -539,7 +574,6 @@ private class RecordsChannelBarAdapter(
 }
 
 private class RecordsDatesAdapter(
-    private val days: List<RecordsDaySlot>,
     private val selectedIndexProvider: () -> Int,
     private val onDayPicked: (Int) -> Unit,
     private val onDpadRightFromDate: () -> Boolean,
@@ -547,16 +581,24 @@ private class RecordsDatesAdapter(
     private val sidebarFocusLeftId: Int,
 ) : RecyclerView.Adapter<RecordsDatesAdapter.VH>() {
 
+    private val items = mutableListOf<RecordsDaySlot>()
+
+    fun submit(list: List<RecordsDaySlot>) {
+        items.clear()
+        items.addAll(list)
+        notifyDataSetChanged()
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val root = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_records_date, parent, false) as FrameLayout
         return VH(root)
     }
 
-    override fun getItemCount(): Int = days.size
+    override fun getItemCount(): Int = items.size
 
     override fun onBindViewHolder(holder: VH, position: Int) {
-        val day = days[position]
+        val day = items[position]
         holder.text.text = day.label
         val selected = position == selectedIndexProvider()
         holder.itemView.isSelected = selected

@@ -3,7 +3,6 @@ package com.example.new_tv_app.iptv
 import android.net.Uri
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.TimeZone
 
 /**
  * Xtream-style direct live URLs (same credentials as [XtreamLiveApi]).
@@ -156,7 +155,9 @@ object IptvStreamUrls {
      */
     private fun rawDurationMinutes(startRaw: String, endRaw: String): Int {
         return try {
-            val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+            val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+                timeZone = IptvTimeUtils.ISRAEL_TZ
+            }
             val tStart = fmt.parse(startRaw.trim())?.time ?: return 8 * 60
             val tEnd   = fmt.parse(endRaw.trim())?.time   ?: return 8 * 60
             if (tEnd <= tStart) return 8 * 60

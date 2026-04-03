@@ -13,6 +13,7 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.new_tv_app.iptv.IptvCredentials
+import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.XtreamAuthApi
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -40,7 +41,9 @@ class LoginActivity : FragmentActivity() {
 
         findViewById<TextView>(R.id.login_build).text = getString(
             R.string.login_build_fmt,
-            SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date()),
+            SimpleDateFormat("dd-MM-yyyy", Locale.US).apply {
+                timeZone = IptvTimeUtils.ISRAEL_TZ
+            }.format(Date()),
             BuildConfig.VERSION_NAME,
             BuildConfig.VERSION_CODE,
         )

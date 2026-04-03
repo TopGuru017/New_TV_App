@@ -16,6 +16,7 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import com.example.new_tv_app.databinding.FragmentSettingsBinding
 import com.example.new_tv_app.iptv.IptvCredentials
+import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import java.io.File
 import java.text.SimpleDateFormat
@@ -84,7 +85,9 @@ class SettingsFragment : Fragment() {
 
         binding.settingsBuildInfo.text = getString(
             R.string.settings_build_fmt,
-            SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date()),
+            SimpleDateFormat("dd-MM-yyyy", Locale.US).apply {
+                timeZone = IptvTimeUtils.ISRAEL_TZ
+            }.format(Date()),
             BuildConfig.VERSION_NAME,
             BuildConfig.VERSION_CODE,
         )

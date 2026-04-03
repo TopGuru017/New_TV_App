@@ -13,6 +13,7 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.example.new_tv_app.iptv.IptvCredentials
+import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.iptv.PlayerAccount
 import com.example.new_tv_app.iptv.PlayerApiFetcher
 import kotlinx.coroutines.launch
@@ -160,12 +161,16 @@ class ProfileFragment : Fragment() {
     }
 
     private fun formatUnixSeconds(tsSeconds: Long): String {
-        val sdf = SimpleDateFormat("HH:mm:ss dd-MM-yyyy", Locale.getDefault())
+        val sdf = SimpleDateFormat("HH:mm:ss dd-MM-yyyy", Locale.getDefault()).apply {
+            timeZone = IptvTimeUtils.ISRAEL_TZ
+        }
         return sdf.format(Date(tsSeconds * 1000L))
     }
 
     private fun formatDateOnly(tsSeconds: Long): String {
-        val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault())
+        val sdf = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).apply {
+            timeZone = IptvTimeUtils.ISRAEL_TZ
+        }
         return sdf.format(Date(tsSeconds * 1000L))
     }
 

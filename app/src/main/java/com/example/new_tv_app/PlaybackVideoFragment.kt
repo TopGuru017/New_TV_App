@@ -26,8 +26,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import com.example.new_tv_app.playback.AacFriendlyMediaCodecSelector
 import com.example.new_tv_app.playback.TimeshiftAwareDataSourceFactory
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -218,10 +220,17 @@ class PlaybackVideoFragment : Fragment() {
         recordsDayListings.clear()
         @Suppress("DEPRECATION")
         val rawList = requireActivity().intent.getSerializableExtra(PlaybackActivity.RECORDS_DAY_LISTINGS)
+        val nowSec = IptvTimeUtils.nowIsraelSeconds()
+        val playingId = movie.id
         if (rawList is ArrayList<*>) {
             for (e in rawList) {
-                if (e is EpgListing) recordsDayListings.add(e)
+                if (e !is EpgListing) continue
+                val rowId = e.startUnix xor e.endUnix
+                if (IptvTimeUtils.eligibleForRecordsList(e.endUnix, nowSec) || rowId == playingId) {
+                    recordsDayListings.add(e)
+                }
             }
+            recordsDayListings.sortBy { it.startUnix }
         }
 
         currentPlaybackUrl = url
@@ -491,10 +500,16 @@ class PlaybackVideoFragment : Fragment() {
                 DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
             )
             .build()
-        val player = ExoPlayer.Builder(requireContext())
-            .setMediaSourceFactory(DefaultMediaSourceFactory(tsFactory))
-            .setLoadControl(loadControl)
-            .build()
+        val renderersFactory =
+            DefaultRenderersFactory(requireContext())
+                .setEnableDecoderFallback(true)
+                .setMediaCodecSelector(AacFriendlyMediaCodecSelector())
+        val player =
+            ExoPlayer.Builder(requireContext())
+                .setRenderersFactory(renderersFactory)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(tsFactory))
+                .setLoadControl(loadControl)
+                .build()
         player.repeatMode = Player.REPEAT_MODE_OFF
         mediaPlayer = player
         videoLayout.player = player
@@ -735,16 +750,20 @@ class PlaybackVideoFragment : Fragment() {
                     ?: IptvTimeUtils.nowIsraelSeconds()
                 val dayStart = IptvTimeUtils.startOfDayIsraelSeconds(recordingStartSec)
                 val dayEnd = IptvTimeUtils.endOfDayIsraelSeconds(dayStart)
-                val dayListings = allListings
-                    .filter { it.startUnix >= dayStart && it.startUnix < dayEnd }
-                    .sortedBy { it.startUnix }
-                if (dayListings.isEmpty()) return@onSuccess
-                recordsDayListings.clear()
-                recordsDayListings.addAll(dayListings)
-                // Try to pin currentArchiveListingId to the listing that covers the start time
+                val now = IptvTimeUtils.nowIsraelSeconds()
                 val anchor = allListings.find {
                     recordingStartSec >= it.startUnix && recordingStartSec < it.endUnix
                 }
+                var dayListings = allListings
+                    .filter { it.startUnix >= dayStart && it.startUnix < dayEnd }
+                    .filter { IptvTimeUtils.eligibleForRecordsList(it.endUnix, now) }
+                    .sortedBy { it.startUnix }
+                if (anchor != null && dayListings.none { it.startUnix == anchor.startUnix && it.endUnix == anchor.endUnix }) {
+                    dayListings = (dayListings + anchor).sortedBy { it.startUnix }
+                }
+                if (dayListings.isEmpty()) return@onSuccess
+                recordsDayListings.clear()
+                recordsDayListings.addAll(dayListings)
                 if (anchor != null) {
                     currentArchiveListingId = anchor.startUnix xor anchor.endUnix
                 }
