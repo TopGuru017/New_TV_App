@@ -35,6 +35,7 @@ import com.example.new_tv_app.iptv.displayTitleWithTmdbRating
 import com.example.new_tv_app.iptv.isVodNewWithin24Hours
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import com.example.new_tv_app.iptv.XtreamVodApi
+import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -92,7 +93,7 @@ class SearchFragment : Fragment() {
         nameGetter = { it.name },
         posterGetter = { it.coverUrl },
         showNewBadge = { isVodNewWithin24Hours(it.addedUnixSeconds) },
-        onPick = { playSeries(it) },
+        onPick = { openSeriesProgramme(it) },
         onRequestFocusNextRow = { focusFirstInRecyclerView(rvMovies) },
     )
     private val moviesAdapter = SearchVodStripAdapter<VodMovieItem>(
@@ -626,37 +627,26 @@ class SearchFragment : Fragment() {
         )
     }
 
-    private fun playSeries(s: SeriesShow) {
-        viewLifecycleOwner.lifecycleScope.launch {
-            val r = XtreamVodApi.fetchFirstSeriesEpisode(s.seriesId)
-            if (!isAdded) return@launch
-            r.fold(
-                onSuccess = { (epId, ext) ->
-                    val url = IptvStreamUrls.seriesEpisodeUrl(epId, ext)
-                    val movie = Movie(
-                        id = s.seriesId.hashCode().toLong(),
-                        title = s.name,
-                        description = getString(R.string.search_badge_series),
-                        backgroundImageUrl = s.coverUrl,
-                        cardImageUrl = s.coverUrl,
-                        videoUrl = url,
-                        studio = null,
-                    )
-                    startActivity(
-                        Intent(requireContext(), PlaybackActivity::class.java).apply {
-                            putExtra(DetailsActivity.MOVIE, movie)
-                        },
-                    )
-                },
-                onFailure = {
-                    Toast.makeText(
-                        requireContext(),
-                        R.string.vod_series_episode_error,
-                        Toast.LENGTH_LONG,
-                    ).show()
-                },
-            )
+    private fun openSeriesProgramme(s: SeriesShow) {
+        requireActivity().findViewById<IptvSidebarView>(R.id.iptv_sidebar)?.let { sidebar ->
+            sidebar.lockExpand()
+            sidebar.setExpanded(false)
         }
+        parentFragmentManager.beginTransaction()
+            .setReorderingAllowed(true)
+            .hide(this)
+            .add(
+                R.id.main_content,
+                VodSeriesFolderFragment.newInstance(
+                    seriesId = s.seriesId,
+                    seriesName = s.name,
+                    seriesCover = s.coverUrl,
+                    categoryName = getString(R.string.search_badge_series),
+                    seriesPlotFromList = s.plot,
+                ),
+            )
+            .addToBackStack(null)
+            .commit()
     }
 }
 

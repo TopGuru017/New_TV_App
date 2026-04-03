@@ -47,6 +47,8 @@ import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.FavoriteVodStore
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LastWatchPlaybackPositionStore
+import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.LiveStream
 import com.example.new_tv_app.iptv.XtreamLiveApi
 import java.util.Locale
@@ -164,6 +166,8 @@ class PlaybackVideoFragment : Fragment() {
     private lateinit var vodInfoBackCallback: OnBackPressedCallback
 
     private lateinit var playbackMovie: Movie
+    /** One-shot seek from intent ([PlaybackActivity.INITIAL_POSITION_MS]); [C.TIME_UNSET] = none. */
+    private var pendingInitialSeekMs: Long = C.TIME_UNSET
 
     private lateinit var vodInfoOverlay: View
     private lateinit var vodInfoThumb: ImageView
@@ -220,6 +224,17 @@ class PlaybackVideoFragment : Fragment() {
             .firstOrNull { !it.isNullOrBlank() }
 
         playbackMovie = movie
+
+        val initialExtra = requireActivity().intent.getLongExtra(
+            PlaybackActivity.INITIAL_POSITION_MS,
+            PlaybackActivity.NO_INITIAL_POSITION,
+        )
+        pendingInitialSeekMs =
+            if (initialExtra != PlaybackActivity.NO_INITIAL_POSITION && initialExtra >= 0L) {
+                initialExtra
+            } else {
+                C.TIME_UNSET
+            }
 
         currentArchiveListingId = movie.id
         recordsArchiveStreamId =
@@ -366,13 +381,24 @@ class PlaybackVideoFragment : Fragment() {
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
                         if (liveInfoVisible) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                LiveTvNavLog.i(
+                                    "playback LIVE: DPAD_UP — channel preview prev " +
+                                        "(playingIdx=$liveChannelIndex previewIdx=$livePreviewChannelIndex " +
+                                        "channels=${liveCategoryChannels.size})",
+                                )
                                 flashLiveArrow(LiveEpgStripAdapter.FLASH_UP)
                                 livePreviewPrevChannel()
                             } else {
+                                LiveTvNavLog.i(
+                                    "playback LIVE: DPAD_DOWN — channel preview next " +
+                                        "(playingIdx=$liveChannelIndex previewIdx=$livePreviewChannelIndex " +
+                                        "channels=${liveCategoryChannels.size})",
+                                )
                                 flashLiveArrow(LiveEpgStripAdapter.FLASH_DOWN)
                                 livePreviewNextChannel()
                             }
                         } else {
+                            LiveTvNavLog.i("playback LIVE: DPAD_UP/DOWN — open live overlay (EPG + channel list)")
                             openLiveInfoOverlay()
                         }
                         return@setOnKeyListener true
@@ -428,9 +454,11 @@ class PlaybackVideoFragment : Fragment() {
                     // Live EPG strip open: left/right scroll the programme row
                     if (liveInfoVisible) {
                         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            LiveTvNavLog.i("playback LIVE: DPAD_LEFT — EPG strip prev programme")
                             flashLiveArrow(LiveEpgStripAdapter.FLASH_LEFT)
                             liveEpgBrowsePrev()
                         } else {
+                            LiveTvNavLog.i("playback LIVE: DPAD_RIGHT — EPG strip next programme")
                             flashLiveArrow(LiveEpgStripAdapter.FLASH_RIGHT)
                             liveEpgBrowseNext()
                         }
@@ -462,6 +490,11 @@ class PlaybackVideoFragment : Fragment() {
                         if (previewIdx >= 0 && previewIdx != liveChannelIndex &&
                             liveCategoryChannels.isNotEmpty()
                         ) {
+                            LiveTvNavLog.i(
+                                "playback LIVE: OK — switch from playing " +
+                                    "[idx=$liveChannelIndex ${liveCategoryChannels.getOrNull(liveChannelIndex)?.name}] " +
+                                    "to preview [idx=$previewIdx ${liveCategoryChannels[previewIdx].name}]",
+                            )
                             // User confirmed a different channel — hide overlay first so clearing EPG
                             // never flashes an empty/grey strip; then switch the player.
                             liveChannelIndex = previewIdx
@@ -470,6 +503,10 @@ class PlaybackVideoFragment : Fragment() {
                             closeLiveInfoOverlay()
                             liveSwitchToChannel(liveCategoryChannels[previewIdx])
                         } else {
+                            LiveTvNavLog.i(
+                                "playback LIVE: OK — same channel or no preview switch " +
+                                    "(previewIdx=$previewIdx playingIdx=$liveChannelIndex)",
+                            )
                             handleLiveCardSelect()
                         }
                         return@setOnKeyListener true
@@ -573,6 +610,15 @@ class PlaybackVideoFragment : Fragment() {
                         else -> "UNKNOWN($playbackState)"
                     }
                     Log.d(TAG, "state=$state")
+                    if (playbackState == Player.STATE_READY) {
+                        val pending = pendingInitialSeekMs
+                        if (pending != C.TIME_UNSET && pending >= 0L) {
+                            pendingInitialSeekMs = C.TIME_UNSET
+                            runCatching { player.seekTo(pending) }
+                                .onFailure { Log.w(TAG, "initial seek failed", it) }
+                            view.post { rebuildTrickStripIfNeeded() }
+                        }
+                    }
                     if (playbackState == Player.STATE_ENDED) {
                         // Recordings are often served as live HLS (no #EXT-X-ENDLIST). When the
                         // server pushes new manifest segments after end-of-content, ExoPlayer can
@@ -608,6 +654,7 @@ class PlaybackVideoFragment : Fragment() {
         Log.d(TAG, "onStop → pause()")
         view?.removeCallbacks(progressTicker)
         timeshiftDataSourceFactory?.stop()
+        mediaPlayer?.let { persistVodResumePosition(it) }
         mediaPlayer?.pause()
         super.onStop()
     }
@@ -626,6 +673,7 @@ class PlaybackVideoFragment : Fragment() {
             liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         }
         mediaPlayer?.let { p ->
+            persistVodResumePosition(p)
             p.stop()
             p.release()
         }
@@ -1067,6 +1115,9 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun openLiveInfoOverlay() {
         if (liveInfoVisible) return
+        LiveTvNavLog.i(
+            "playback LIVE: openLiveInfoOverlay playingIdx=$liveChannelIndex streamId=$liveStreamId catId=$liveCategoryId",
+        )
         livePreviewChannelIndex = liveChannelIndex
         livePreviewStreamName = null
         livePreviewStreamIcon = null
@@ -1088,6 +1139,7 @@ class PlaybackVideoFragment : Fragment() {
 
     private fun closeLiveInfoOverlay() {
         if (!liveInfoVisible) return
+        LiveTvNavLog.i("playback LIVE: closeLiveInfoOverlay")
         liveEpgLoadJob?.cancel()
         liveEpgRv.removeCallbacks(liveArrowResetRunnable)
         liveInfoBackCallback.isEnabled = false
@@ -1142,6 +1194,22 @@ class PlaybackVideoFragment : Fragment() {
                 liveCategoryChannels.clear()
                 liveCategoryChannels.addAll(channels)
                 liveChannelIndex = channels.indexOfFirst { it.streamId == liveStreamId }
+                // Overlay may have opened before this async load finished; openLiveInfoOverlay copies
+                // liveChannelIndex while it was still -1, leaving livePreviewChannelIndex at -1.
+                // livePreviewNextChannel used coerceAtLeast(0) → first DOWN jumped to index 1 (2nd channel).
+                if (liveInfoVisible) {
+                    livePreviewChannelIndex = if (liveChannelIndex >= 0) liveChannelIndex else 0
+                    LiveTvNavLog.i(
+                        "playback LIVE: loadLiveCategoryIfNeeded loaded count=${channels.size} " +
+                            "playingIdx=$liveChannelIndex streamId=$liveStreamId " +
+                            "→ sync previewIdx=$livePreviewChannelIndex",
+                    )
+                } else {
+                    LiveTvNavLog.i(
+                        "playback LIVE: loadLiveCategoryIfNeeded loaded count=${channels.size} " +
+                            "playingIdx=$liveChannelIndex streamId=$liveStreamId",
+                    )
+                }
             }
         }
     }
@@ -1149,16 +1217,40 @@ class PlaybackVideoFragment : Fragment() {
     /** Move the overlay preview one channel up without switching playback. */
     private fun livePreviewPrevChannel() {
         val cur = livePreviewChannelIndex.coerceAtLeast(0)
-        if (liveCategoryChannels.isEmpty() || cur <= 0) return
+        if (liveCategoryChannels.isEmpty()) {
+            LiveTvNavLog.i("playback LIVE: livePreviewPrevChannel skip — category list empty (load not done?)")
+            return
+        }
+        if (cur <= 0) {
+            LiveTvNavLog.i("playback LIVE: livePreviewPrevChannel skip — already first previewIdx=$cur")
+            return
+        }
         livePreviewChannelIndex = cur - 1
+        LiveTvNavLog.i(
+            "playback LIVE: livePreviewPrevChannel → previewIdx=$livePreviewChannelIndex " +
+                "name=${liveCategoryChannels[livePreviewChannelIndex].name}",
+        )
         liveShowChannelPreview(liveCategoryChannels[livePreviewChannelIndex])
     }
 
     /** Move the overlay preview one channel down without switching playback. */
     private fun livePreviewNextChannel() {
         val cur = livePreviewChannelIndex.coerceAtLeast(0)
-        if (liveCategoryChannels.isEmpty() || cur >= liveCategoryChannels.lastIndex) return
+        if (liveCategoryChannels.isEmpty()) {
+            LiveTvNavLog.i("playback LIVE: livePreviewNextChannel skip — category list empty (load not done?)")
+            return
+        }
+        if (cur >= liveCategoryChannels.lastIndex) {
+            LiveTvNavLog.i(
+                "playback LIVE: livePreviewNextChannel skip — already last previewIdx=$cur / ${liveCategoryChannels.lastIndex}",
+            )
+            return
+        }
         livePreviewChannelIndex = cur + 1
+        LiveTvNavLog.i(
+            "playback LIVE: livePreviewNextChannel → previewIdx=$livePreviewChannelIndex " +
+                "name=${liveCategoryChannels[livePreviewChannelIndex].name}",
+        )
         liveShowChannelPreview(liveCategoryChannels[livePreviewChannelIndex])
     }
 
@@ -1167,6 +1259,9 @@ class PlaybackVideoFragment : Fragment() {
      * The user must press OK to confirm and actually switch.
      */
     private fun liveShowChannelPreview(stream: LiveStream) {
+        LiveTvNavLog.i(
+            "playback LIVE: liveShowChannelPreview streamId=${stream.streamId} name=${stream.name}",
+        )
         livePreviewStreamName = stream.name
         livePreviewStreamIcon = stream.iconUrl
         liveEpgLoadJob?.cancel()
@@ -1215,6 +1310,7 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     private fun liveSwitchToChannel(stream: LiveStream) {
+        LiveTvNavLog.i("playback LIVE: liveSwitchToChannel streamId=${stream.streamId} name=${stream.name}")
         liveEpgPreviewSeq++
         liveStreamId = stream.streamId
         liveTvArchive = stream.tvArchive
@@ -1446,6 +1542,15 @@ class PlaybackVideoFragment : Fragment() {
     private fun isVodPlaybackMode(): Boolean {
         if (!recordsArchiveStreamId.isNullOrEmpty()) return false
         return isVodOrSeriesUrl(currentPlaybackUrl)
+    }
+
+    private fun persistVodResumePosition(player: ExoPlayer) {
+        if (!isVodPlaybackMode()) return
+        val key = LastWatchStore.resumeCacheKeyForPlayback(playbackMovie) ?: return
+        val pos = player.currentPosition.coerceAtLeast(0L)
+        val durRaw = player.duration
+        val dur = if (durRaw > 0L && durRaw != C.TIME_UNSET) durRaw else 0L
+        LastWatchPlaybackPositionStore.save(requireContext(), key, pos, dur)
     }
 
     private fun showVodInfoOverlay() {

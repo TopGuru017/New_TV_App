@@ -15,6 +15,8 @@ import android.widget.TextView
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import com.example.new_tv_app.databinding.FragmentSettingsBinding
+import com.bumptech.glide.Glide
+import com.example.new_tv_app.iptv.AppSessionCleanup
 import com.example.new_tv_app.iptv.IptvCredentials
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
@@ -283,9 +285,9 @@ class SettingsFragment : Fragment() {
 
     private fun clearAppCache() {
         val ctx = requireContext()
+        AppSessionCleanup.clearAppCacheDirectories(ctx)
         try {
-            ctx.cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-            ctx.externalCacheDir?.listFiles()?.forEach { it.deleteRecursively() }
+            Glide.get(ctx.applicationContext).clearMemory()
         } catch (_: Exception) { }
         refreshStorageSummary()
         android.widget.Toast.makeText(ctx, R.string.settings_cache_cleared, android.widget.Toast.LENGTH_SHORT).show()

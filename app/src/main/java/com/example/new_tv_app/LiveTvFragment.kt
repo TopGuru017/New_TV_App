@@ -52,6 +52,7 @@ class LiveTvFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        LiveTvNavLog.i("onViewCreated — open LIVE screen; tag=${LiveTvNavLog.TAG}")
 
         val loading = view.findViewById<ProgressBar>(R.id.live_loading)
         val error = view.findViewById<TextView>(R.id.live_error)
@@ -191,25 +192,40 @@ class LiveTvFragment : Fragment() {
         )
 
         fun requestFocusFirstChannel() {
-            if (channelAdapter.itemCount <= 0) return
+            if (channelAdapter.itemCount <= 0) {
+                LiveTvNavLog.i("requestFocusFirstChannel: skip itemCount=0")
+                return
+            }
+            LiveTvNavLog.i("requestFocusFirstChannel: begin itemCount=${channelAdapter.itemCount}")
             // Do not clearFocus() on main_content: after clearing, the framework often
             // focuses the first focusable in the fragment (first category chip), which
             // triggers scheduleLoadStreams(first) and breaks the selected category.
             channelsRv.scrollToPosition(0)
             fun tryFocus(attempt: Int) {
+                val maxAttempts = 40
+                val stepMs = 32L
                 channelsRv.post {
                     val h = channelsRv.findViewHolderForAdapterPosition(0)
                     if (h != null) {
+                        LiveTvNavLog.i("requestFocusFirstChannel: VH(0) ok attempt=$attempt requesting focus")
                         h.itemView.requestFocus()
-                    } else if (attempt < 16) {
-                        channelsRv.postDelayed({ tryFocus(attempt + 1) }, 24L)
+                    } else if (attempt < maxAttempts) {
+                        LiveTvNavLog.i("requestFocusFirstChannel: VH(0) null attempt=$attempt/$maxAttempts retry in ${stepMs}ms")
+                        channelsRv.postDelayed({ tryFocus(attempt + 1) }, stepMs)
+                    } else {
+                        LiveTvNavLog.i("requestFocusFirstChannel: FAILED VH(0) still null after $maxAttempts attempts")
                     }
                 }
             }
-            tryFocus(0)
+            // Two nested posts: after submit() the grid often needs a layout pass before VH(0) exists.
+            channelsRv.post { channelsRv.post { tryFocus(0) } }
         }
 
         fun scheduleLoadStreams(cat: LiveCategory) {
+            LiveTvNavLog.i(
+                "scheduleLoadStreams: catId=${cat.id} name=${cat.name} pendingDown=$pendingFocusFirstAfterCategoryDown " +
+                    "pendingInitial=$pendingInitialChannelFocus streamsLoadedFor=$streamsLoadedForCategoryId",
+            )
             val previousId = selectedCategoryId
             selectedCategoryId = cat.id
             // Avoid notifyDataSetChanged(): it rebinds every chip and drops D-pad focus on the category row.
@@ -222,17 +238,15 @@ class LiveTvFragment : Fragment() {
                 if (ni >= 0) categoryAdapter.notifyItemChanged(ni)
             }
             if (streamsLoadedForCategoryId == cat.id && channelAdapter.itemCount > 0) {
+                LiveTvNavLog.i("scheduleLoadStreams: CACHE HIT channels=${channelAdapter.itemCount}")
                 channelAdapter.firstStream()?.let { showDetail(it, cat.name) }
                     ?: clearDetailPlaceholder(cat.name)
-                when {
-                    pendingFocusFirstAfterCategoryDown && channelAdapter.itemCount > 0 -> {
-                        pendingFocusFirstAfterCategoryDown = false
-                        requestFocusFirstChannel()
-                    }
-                    pendingInitialChannelFocus && channelAdapter.itemCount > 0 -> {
-                        pendingInitialChannelFocus = false
-                        requestFocusFirstChannel()
-                    }
+                // One branch only: DPAD-down and initial-open can both be pending; clear both when focusing grid.
+                if ((pendingFocusFirstAfterCategoryDown || pendingInitialChannelFocus) && channelAdapter.itemCount > 0) {
+                    LiveTvNavLog.i("scheduleLoadStreams: cache path → requestFocusFirstChannel()")
+                    pendingFocusFirstAfterCategoryDown = false
+                    pendingInitialChannelFocus = false
+                    requestFocusFirstChannel()
                 }
                 return
             }
@@ -249,19 +263,16 @@ class LiveTvFragment : Fragment() {
                         channelsEmpty.isVisible = streams.isEmpty()
                         if (streams.isNotEmpty()) {
                             showDetail(streams.first(), cat.name)
-                            when {
-                                pendingFocusFirstAfterCategoryDown -> {
-                                    pendingFocusFirstAfterCategoryDown = false
-                                    requestFocusFirstChannel()
-                                }
-                                pendingInitialChannelFocus -> {
-                                    pendingInitialChannelFocus = false
-                                    requestFocusFirstChannel()
-                                }
+                            if (pendingFocusFirstAfterCategoryDown || pendingInitialChannelFocus) {
+                                LiveTvNavLog.i("scheduleLoadStreams: network success → requestFocusFirstChannel() count=${streams.size}")
+                                pendingFocusFirstAfterCategoryDown = false
+                                pendingInitialChannelFocus = false
+                                requestFocusFirstChannel()
                             }
                         } else {
                             clearDetailPlaceholder(cat.name)
                             pendingFocusFirstAfterCategoryDown = false
+                            pendingInitialChannelFocus = false
                         }
                     },
                     onFailure = {
@@ -271,12 +282,14 @@ class LiveTvFragment : Fragment() {
                         channelsEmpty.isVisible = true
                         clearDetailPlaceholder(cat.name)
                         pendingFocusFirstAfterCategoryDown = false
+                        pendingInitialChannelFocus = false
                     }
                 )
             }
         }
 
         fun onCategoryDpadDown(cat: LiveCategory) {
+            LiveTvNavLog.i("onCategoryDpadDown: catId=${cat.id} name=${cat.name}")
             pendingFocusFirstAfterCategoryDown = true
             scheduleLoadStreams(cat)
         }
@@ -336,7 +349,13 @@ class LiveTvFragment : Fragment() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        LiveTvNavLog.i("onResume — fragment visible")
+    }
+
     override fun onDestroyView() {
+        LiveTvNavLog.i("onDestroyView")
         epgFetchJob?.cancel()
         loadStreamsJob?.cancel()
         super.onDestroyView()
@@ -346,30 +365,41 @@ class LiveTvFragment : Fragment() {
 
 /** Horizontal category list: next item may be off-screen; scroll then focus (DPAD hits focused child, not the RV). */
 private fun requestFocusCategoryAfterScroll(rv: RecyclerView, adapterPosition: Int) {
+    LiveTvNavLog.i("requestFocusCategoryAfterScroll: adapterPos=$adapterPosition (double-post + retries)")
     rv.post {
-        val h = rv.findViewHolderForAdapterPosition(adapterPosition)
-        if (h != null) {
-            h.itemView.requestFocus()
-        } else {
-            rv.postDelayed(
-                {
-                    rv.findViewHolderForAdapterPosition(adapterPosition)?.itemView?.requestFocus()
-                },
-                64L
-            )
+        rv.post {
+            attemptCategoryFocus(rv, adapterPosition, attemptsRemaining = 40)
         }
+    }
+}
+
+private fun attemptCategoryFocus(rv: RecyclerView, adapterPosition: Int, attemptsRemaining: Int) {
+    val h = rv.findViewHolderForAdapterPosition(adapterPosition)
+    if (h != null) {
+        LiveTvNavLog.i("attemptCategoryFocus: OK adapterPos=$adapterPosition")
+        h.itemView.requestFocus()
+    } else if (attemptsRemaining > 0) {
+        LiveTvNavLog.i("attemptCategoryFocus: VH null adapterPos=$adapterPosition remaining=$attemptsRemaining")
+        rv.postDelayed({ attemptCategoryFocus(rv, adapterPosition, attemptsRemaining - 1) }, 32L)
+    } else {
+        LiveTvNavLog.i("attemptCategoryFocus: FAILED adapterPos=$adapterPosition (no VH after retries)")
     }
 }
 
 /** Focus a grid cell after scrolling (DPAD row wrap across incomplete last row). */
 private fun requestFocusGridCell(rv: RecyclerView, adapterPosition: Int, attemptsRemaining: Int = 24) {
+    LiveTvNavLog.i("requestFocusGridCell: adapterPos=$adapterPosition attemptsLeft=$attemptsRemaining")
     rv.scrollToPosition(adapterPosition)
     rv.post {
         val h = rv.findViewHolderForAdapterPosition(adapterPosition)
         if (h != null) {
+            LiveTvNavLog.i("requestFocusGridCell: OK pos=$adapterPosition")
             h.itemView.requestFocus()
         } else if (attemptsRemaining > 0) {
+            LiveTvNavLog.i("requestFocusGridCell: VH null pos=$adapterPosition retry")
             rv.postDelayed({ requestFocusGridCell(rv, adapterPosition, attemptsRemaining - 1) }, 32L)
+        } else {
+            LiveTvNavLog.i("requestFocusGridCell: FAILED pos=$adapterPosition")
         }
     }
 }
@@ -441,6 +471,9 @@ private class LiveCategoryAdapter(
             val lm = rv.layoutManager as? LinearLayoutManager ?: return@setOnKeyListener false
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    LiveTvNavLog.i(
+                        "category key DOWN: listPos=$pos catId=${items[pos].id} name=${items[pos].name}",
+                    )
                     onCategoryDpadDown(items[pos])
                     true
                 }
@@ -542,6 +575,10 @@ private class LiveChannelAdapter(
             val idx = selectedCategoryIndex()
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    LiveTvNavLog.i(
+                        "channel key LEFT: pos=$position rowStart=$rowStart rowEnd=$rowEnd " +
+                            "stream=${stream.name} id=${stream.streamId}",
+                    )
                     if (position == rowStart) {
                         if (position > 0) {
                             focusGridCellAt(position - 1)
@@ -554,6 +591,10 @@ private class LiveChannelAdapter(
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    LiveTvNavLog.i(
+                        "channel key RIGHT: pos=$position rowStart=$rowStart rowEnd=$rowEnd " +
+                            "stream=${stream.name} id=${stream.streamId}",
+                    )
                     if (position == rowEnd) {
                         if (position < itemCount - 1) {
                             focusGridCellAt(position + 1)
@@ -566,12 +607,42 @@ private class LiveChannelAdapter(
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_UP -> {
-                    if (position < spanCount) {
+                    if (position >= spanCount) {
+                        val target = position - spanCount
+                        LiveTvNavLog.i(
+                            "channel key UP: pos=$position → grid cell $target (same column) " +
+                                "stream=${stream.name} span=$spanCount itemCount=$itemCount",
+                        )
+                        focusGridCellAt(target)
+                        true
+                    } else {
+                        LiveTvNavLog.i(
+                            "channel key UP: pos=$position first row → category strip catIndex=$idx " +
+                                "stream=${stream.name}",
+                        )
                         categoriesRecyclerView.scrollToPosition(idx)
                         requestFocusCategoryAfterScroll(categoriesRecyclerView, idx)
                         true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    val below = position + spanCount
+                    if (below < itemCount) {
+                        LiveTvNavLog.i(
+                            "channel key DOWN: pos=$position → $below stream=${stream.name} " +
+                                "span=$spanCount itemCount=$itemCount",
+                        )
+                        focusGridCellAt(below)
+                        true
                     } else {
-                        false
+                        LiveTvNavLog.i(
+                            "channel key DOWN: pos=$position below=$below no row below — consume " +
+                                "stream=${stream.name} itemCount=$itemCount",
+                        )
+                        // No row below: must consume — otherwise the framework moves focus to the next
+                        // focusable in traversal order (often the next channel in the same row), which
+                        // feels like "DOWN jumped to the 2nd channel".
+                        true
                     }
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
@@ -589,6 +660,9 @@ private class LiveChannelAdapter(
         }
         holder.itemView.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) {
+                LiveTvNavLog.i(
+                    "channel FOCUS: adapterPos=$position stream=${stream.name} id=${stream.streamId}",
+                )
                 onChannelFocused(stream, categoryNameProvider())
             }
         }

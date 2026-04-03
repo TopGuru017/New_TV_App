@@ -1,5 +1,6 @@
 package com.example.new_tv_app
 
+import android.app.AlertDialog
 import android.graphics.Rect
 import android.os.Bundle
 import android.content.Intent
@@ -18,6 +19,7 @@ import com.bumptech.glide.load.resource.bitmap.CenterCrop
 import com.bumptech.glide.load.resource.bitmap.RoundedCorners
 import com.bumptech.glide.request.RequestOptions
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LastWatchPlaybackPositionStore
 import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.LastWatchStore.LastWatchEntry
 
@@ -26,12 +28,44 @@ import com.example.new_tv_app.iptv.LastWatchStore.LastWatchEntry
  */
 class HomeContentFragment : Fragment() {
 
-    private fun openMovie(movie: Movie) {
+    private fun openPlaybackFromLastWatch(entry: LastWatchEntry) {
+        val url = entry.movie.videoUrl.orEmpty().trim()
+        if (url.isEmpty()) return
+
+        val cacheKey = LastWatchStore.resumeCacheKey(entry)
+        if (cacheKey != null) {
+            val snap = LastWatchPlaybackPositionStore.read(requireContext(), cacheKey)
+            if (snap != null && LastWatchPlaybackPositionStore.shouldOfferResume(snap)) {
+                val dialog = AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.last_watch_resume_title)
+                    .setMessage(R.string.last_watch_resume_message)
+                    .setPositiveButton(R.string.last_watch_resume_resume) { _, _ ->
+                        launchPlayback(entry.movie, snap.positionMs)
+                    }
+                    .setNegativeButton(R.string.last_watch_resume_restart) { _, _ ->
+                        LastWatchPlaybackPositionStore.remove(requireContext(), cacheKey)
+                        launchPlayback(entry.movie, null)
+                    }
+                    .create()
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+                }
+                dialog.show()
+                return
+            }
+        }
+        launchPlayback(entry.movie, null)
+    }
+
+    private fun launchPlayback(movie: Movie, initialPositionMs: Long?) {
         val url = movie.videoUrl.orEmpty().trim()
         if (url.isEmpty()) return
         startActivity(
             Intent(requireContext(), PlaybackActivity::class.java).apply {
                 putExtra(DetailsActivity.MOVIE, movie)
+                if (initialPositionMs != null) {
+                    putExtra(PlaybackActivity.INITIAL_POSITION_MS, initialPositionMs)
+                }
             },
         )
     }
@@ -92,7 +126,7 @@ class HomeContentFragment : Fragment() {
         moviesRv.addItemDecoration(rowSpacing)
 
         recordsAdapter = LastWatchRecordsAdapter(
-            onOpen = { entry -> openMovie(entry.movie) },
+            onOpen = { entry -> openPlaybackFromLastWatch(entry) },
             onRemove = { entry ->
                 LastWatchStore.removeEntry(requireContext(), entry)
                 loadLastWatch()
@@ -111,7 +145,7 @@ class HomeContentFragment : Fragment() {
             },
         )
         vodSeriesAdapter = LastWatchVodAdapter(
-            onOpen = { entry -> openMovie(entry.movie) },
+            onOpen = { entry -> openPlaybackFromLastWatch(entry) },
             onRemove = { entry ->
                 LastWatchStore.removeEntry(requireContext(), entry)
                 loadLastWatch()
@@ -128,7 +162,7 @@ class HomeContentFragment : Fragment() {
             },
         )
         vodMoviesAdapter = LastWatchVodAdapter(
-            onOpen = { entry -> openMovie(entry.movie) },
+            onOpen = { entry -> openPlaybackFromLastWatch(entry) },
             onRemove = { entry ->
                 LastWatchStore.removeEntry(requireContext(), entry)
                 loadLastWatch()

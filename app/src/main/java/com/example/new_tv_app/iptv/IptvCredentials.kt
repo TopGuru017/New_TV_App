@@ -25,7 +25,12 @@ object IptvCredentials {
     }
 
     fun clear() {
-        prefs.edit().remove(KEY_USERNAME).remove(KEY_PASSWORD).apply()
+        AppSessionCleanup.clearCachesOnLogout(app)
+        prefs.edit()
+            .remove(KEY_USERNAME)
+            .remove(KEY_PASSWORD)
+            .remove(KEY_LAST_WORKING_BASE_URL)
+            .apply()
     }
 
     fun isLoggedIn(): Boolean =

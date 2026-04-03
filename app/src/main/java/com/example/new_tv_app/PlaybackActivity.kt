@@ -17,6 +17,10 @@ class PlaybackActivity : FragmentActivity() {
         const val LIVE_STREAM_ID = "live_stream_id"
         /** Live TV: whether this channel has tv_archive / catch-up enabled on the server. */
         const val LIVE_TV_ARCHIVE = "live_tv_archive"
+        /** VOD: seek to this position (ms) once the player is ready. See [NO_INITIAL_POSITION]. */
+        const val INITIAL_POSITION_MS = "initial_position_ms"
+        /** Intent extra default: no resume seek. */
+        const val NO_INITIAL_POSITION = -1L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

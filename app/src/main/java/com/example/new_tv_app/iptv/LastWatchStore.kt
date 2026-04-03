@@ -185,6 +185,42 @@ object LastWatchStore {
      * - Records: channel + programme id ([Movie.id] is listing xor for that slot).
      * - VOD movie / series: Xtream stream id from the last path segment (same id across .mp4/.m3u8/http/https).
      */
+    /**
+     * Stable key for resume position cache (matches [canonicalDedupeKey] for VOD rows).
+     * Null for recordings or non-VOD URLs.
+     */
+    fun resumeCacheKey(entry: LastWatchEntry): String? =
+        when (entry.kind) {
+            Kind.VOD_MOVIES, Kind.VOD_SERIES -> canonicalDedupeKey(entry)
+            else -> null
+        }
+
+    /**
+     * Key for persisting playback position while a VOD movie/series URL is playing.
+     * Series vs movie is inferred from the URL path.
+     */
+    fun resumeCacheKeyForPlayback(movie: Movie): String? {
+        val url = movie.videoUrl?.trim().orEmpty()
+        if (url.isEmpty()) return null
+        val path = runCatching { Uri.parse(url).path }.getOrNull()?.lowercase(Locale.US).orEmpty()
+        val kind = when {
+            path.contains("/series/") -> Kind.VOD_SERIES
+            path.contains("/movie/") -> Kind.VOD_MOVIES
+            else -> return null
+        }
+        return canonicalDedupeKey(
+            LastWatchEntry(
+                kind = kind,
+                playedUnixSeconds = 0L,
+                channelName = null,
+                tag = null,
+                timeRange = null,
+                imageUrl = null,
+                movie = movie,
+            ),
+        )
+    }
+
     private fun canonicalDedupeKey(e: LastWatchEntry): String {
         val url = e.movie.videoUrl?.trim().orEmpty()
         val path = runCatching { Uri.parse(url).path }.getOrNull()?.lowercase(Locale.US).orEmpty()
