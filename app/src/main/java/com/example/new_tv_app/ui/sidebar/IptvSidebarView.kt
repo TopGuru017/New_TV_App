@@ -315,8 +315,24 @@ class IptvSidebarView @JvmOverloads constructor(
 
     fun isExpanded(): Boolean = expanded
 
-    /** Expands the sidebar and moves focus to the first nav item. */
+    /** True if [focused] lies inside this sidebar (e.g. profile or nav rows). */
+    fun isFocusInsideSidebar(focused: View?): Boolean {
+        if (focused == null) return false
+        var v: View? = focused
+        while (v != null) {
+            if (v === this) return true
+            v = v.parent as? View
+        }
+        return false
+    }
+
+    /**
+     * Expands the sidebar and moves focus to the profile row.
+     * Clears a temporary expand lock so this always works (e.g. hardware Back).
+     */
     fun requestSidebarFocus() {
+        expandLockHandler.removeCallbacks(expandUnlockRunnable)
+        expandLocked = false
         setExpanded(true, animate = true)
         profileRow.requestFocus()
     }

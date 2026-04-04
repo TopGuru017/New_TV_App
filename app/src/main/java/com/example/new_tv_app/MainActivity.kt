@@ -23,13 +23,15 @@ class MainActivity : FragmentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                val focusOnSidebar =
+                    sidebar.isExpanded() && sidebar.isFocusInsideSidebar(currentFocus)
+                if (!focusOnSidebar) {
+                    sidebar.requestSidebarFocus()
+                    return
+                }
                 when {
-                    supportFragmentManager.backStackEntryCount > 0 -> supportFragmentManager.popBackStack()
-                    !sidebar.isExpanded() -> {
-                        sidebar.lockExpand()
-                        sidebar.setExpanded(true)
-                        sidebar.requestSidebarFocus()
-                    }
+                    supportFragmentManager.backStackEntryCount > 0 ->
+                        supportFragmentManager.popBackStack()
                     else -> finish()
                 }
             }
