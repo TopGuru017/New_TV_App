@@ -1779,17 +1779,22 @@ class PlaybackVideoFragment : Fragment() {
     }
 
     /**
-     * Builds a [MediaItem] for the given URL. Timeshift URLs are served by many Xtream panels
-     * as live HLS (no `#EXT-X-ENDLIST`) with a sliding segment window. Without special
-     * configuration ExoPlayer would seek to the live edge (end of the recording) instead of
-     * the beginning. Setting a very large [MediaItem.LiveConfiguration.targetOffsetMs] tells
-     * ExoPlayer to position itself as far back from the live edge as possible — i.e. the
-     * oldest available segment — so recordings start from the beginning. Locking
-     * min/max playback speed to 1.0 prevents ExoPlayer from speeding up to "catch" the live
-     * edge, which would cause 404s on segments that have already expired from the window.
+     * Builds a [MediaItem] for the given URL.
+     *
+     * HLS timeshift URLs (`.m3u8`) are served by many Xtream panels as live HLS (no
+     * `#EXT-X-ENDLIST`) with a sliding segment window. Without special configuration ExoPlayer
+     * would seek to the live edge (end of the recording) instead of the beginning. Setting a
+     * very large [MediaItem.LiveConfiguration.targetOffsetMs] tells ExoPlayer to position itself
+     * as far back from the live edge as possible — i.e. the oldest available segment — so
+     * recordings start from the beginning. Locking min/max playback speed to 1.0 prevents
+     * ExoPlayer from speeding up to "catch" the live edge, which would cause 404s on segments
+     * that have already expired from the window.
+     *
+     * Raw MPEG-TS timeshift URLs (`.ts`) are treated as a standard progressive download and
+     * require no live configuration.
      */
     private fun buildMediaItemForUrl(url: String): MediaItem {
-        if (IptvStreamUrls.isTimeshiftUrl(url)) {
+        if (IptvStreamUrls.isTimeshiftUrl(url) && url.endsWith(".m3u8", ignoreCase = true)) {
             return MediaItem.Builder()
                 .setUri(Uri.parse(url))
                 .setLiveConfiguration(

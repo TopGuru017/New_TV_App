@@ -1,5 +1,6 @@
 package com.example.new_tv_app.iptv
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -15,6 +16,7 @@ import java.util.Base64
  * Xtream Codes / XUI live TV endpoints on [player_api.php](https://github.com/tellytv/xtream-api).
  */
 object XtreamLiveApi {
+    private const val RECORDS_API_LOG_TAG = "RecordsApiRequest"
 
     suspend fun fetchLiveCategories(): Result<List<LiveCategory>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -129,6 +131,9 @@ object XtreamLiveApi {
         var lastErr: Throwable? = null
         for (base in IptvCredentials.candidateBaseUrls()) {
             val fullUrl = "$base/${query}"
+            if (shouldLogRecordsApiUrl(action)) {
+                Log.d(RECORDS_API_LOG_TAG, "GET ${sanitizeApiUrlForLogs(fullUrl)}")
+            }
             try {
                 val body = httpGet(fullUrl)
                 IptvCredentials.markWorkingBaseUrl(base)
@@ -139,6 +144,14 @@ object XtreamLiveApi {
         }
         throw (lastErr ?: IllegalStateException("No base URL candidates available"))
     }
+
+    private fun shouldLogRecordsApiUrl(action: String): Boolean =
+        action == "get_simple_data_table" || action == "get_short_epg"
+
+    private fun sanitizeApiUrlForLogs(url: String): String =
+        url
+            .replace(Regex("([?&]password=)[^&]*"), "$1***")
+            .replace(Regex("([?&]username=)[^&]*"), "$1***")
 
     private fun httpGet(url: String): String {
         val conn = URL(url).openConnection() as HttpURLConnection

@@ -6,7 +6,7 @@ import java.util.Locale
 
 /**
  * Xtream-style direct live URLs (same credentials as [XtreamLiveApi]).
- * Most panels serve **HLS** as `.m3u8`; raw `.ts` is less reliable on Android TV.
+ * Catch-up / timeshift streams are requested as raw MPEG-TS (`.ts`).
  */
 object IptvStreamUrls {
 
@@ -58,7 +58,7 @@ object IptvStreamUrls {
     /**
      * Extracts the Xtream stream ID from a timeshift URL.
      *
-     * URL format: `base/timeshift/user/pass/durationMin/startFmt/streamId.m3u8`
+     * URL format: `base/timeshift/user/pass/durationMin/startFmt/streamId.ts`
      * The stream ID is the last path segment, stripped of its extension.
      */
     fun streamIdFromTimeshiftUrl(url: String): String? {
@@ -79,7 +79,7 @@ object IptvStreamUrls {
         val segments = path.split('/').filter { it.isNotEmpty() }
         val timeshiftIdx = segments.indexOfFirst { it.equals("timeshift", ignoreCase = true) }
         if (timeshiftIdx < 0) return null
-        // path after /timeshift: [user, pass, durationMin, startFmt, id.m3u8]
+        // path after /timeshift: [user, pass, durationMin, startFmt, id.ts]
         val startFmt = segments.getOrNull(timeshiftIdx + 4) ?: return null
         return IptvTimeUtils.parseTimeshiftStartIsrael(startFmt)
     }
@@ -120,7 +120,7 @@ object IptvStreamUrls {
         val id = streamId.trim().trimStart('/')
         val durationMinutes = 8 * 60
         val startFmt = IptvTimeUtils.formatTimeshiftStartIsrael(startUnix)
-        return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.m3u8"
+        return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.ts"
     }
 
     /**
@@ -152,7 +152,7 @@ object IptvStreamUrls {
             val u = Uri.encode(IptvCredentials.usernameRaw(), "/")
             val p = Uri.encode(IptvCredentials.passwordRaw(), "/")
             val id = streamId.trim().trimStart('/')
-            return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.m3u8"
+            return "$base/timeshift/$u/$p/$durationMinutes/$startFmt/$id.ts"
         }
         return timeshiftStreamUrl(streamId, startUnix, endUnix)
     }

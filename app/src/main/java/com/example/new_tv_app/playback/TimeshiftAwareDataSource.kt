@@ -21,6 +21,9 @@ internal class TimeshiftAwareDataSource(
 
     override fun open(dataSpec: DataSpec): Long {
         val url = dataSpec.uri.toString()
+        // Only HLS timeshift manifests (.m3u8) need the session keep-alive; raw MPEG-TS (.ts)
+        // timeshift streams are delivered as a single progressive HTTP connection that ExoPlayer
+        // keeps open, so no periodic ping is required.
         if (IptvStreamUrls.isTimeshiftUrl(url) && url.contains(".m3u8", ignoreCase = true)) {
             onManifestOpened(url)
         }

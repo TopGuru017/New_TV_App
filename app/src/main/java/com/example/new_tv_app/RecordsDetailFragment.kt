@@ -3,6 +3,7 @@ package com.example.new_tv_app
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -80,6 +81,7 @@ class RecordsDetailFragment : Fragment() {
     private lateinit var programsAdapter: RecordsProgramsAdapter
 
     companion object {
+        private const val RECORDS_PLAY_URL_LOG_TAG = "RecordsPlayUrl"
         private const val ARG_STREAM_ID = "stream_id"
         private const val ARG_STREAM_NAME = "stream_name"
         private const val ARG_ICON = "icon"
@@ -221,6 +223,7 @@ class RecordsDetailFragment : Fragment() {
             val sid = selectedStreamId
             if (sid.isEmpty()) return
             val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix, listing.startRaw, listing.endRaw)
+            Log.d(RECORDS_PLAY_URL_LOG_TAG, "Play records URL: $url")
             val channelName =
                 barStreams.find { it.streamId == sid }?.name
             val timeRange = IptvTimeUtils.formatTimeRangeIsrael(listing.startUnix, listing.endUnix)
