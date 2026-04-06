@@ -39,6 +39,20 @@ private data class VodCatalogChip(
     val name: String,
 )
 
+private fun prioritizeCategoryFirst(
+    chips: List<VodCatalogChip>,
+    priorityCategoryId: String,
+): List<VodCatalogChip> {
+    val idx = chips.indexOfFirst { it.id == priorityCategoryId }
+    if (idx <= 0) return chips
+    return buildList(chips.size) {
+        add(chips[idx])
+        for (i in chips.indices) {
+            if (i != idx) add(chips[i])
+        }
+    }
+}
+
 /**
  * Movies or series browse: same layout rhythm as [LiveTvFragment], but the hero left column has **no** logo image — title text only.
  */
@@ -407,10 +421,16 @@ class VodBrowseFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             val result = when (mode) {
                 MODE_MOVIES -> XtreamVodApi.fetchVodCategories().map { list ->
-                    list.map { VodCatalogChip(it.id, it.name) }
+                    prioritizeCategoryFirst(
+                        chips = list.map { VodCatalogChip(it.id, it.name) },
+                        priorityCategoryId = "6",
+                    )
                 }
                 else -> XtreamVodApi.fetchSeriesCategories().map { list ->
-                    list.map { VodCatalogChip(it.id, it.name) }
+                    prioritizeCategoryFirst(
+                        chips = list.map { VodCatalogChip(it.id, it.name) },
+                        priorityCategoryId = "4",
+                    )
                 }
             }
             loading.isVisible = false
@@ -619,7 +639,7 @@ private class VodGridAdapter(
 
         if (mode == VodBrowseFragment.MODE_MOVIES) {
             val m = movies[position]
-            holder.name.text = m.displayTitleWithTmdbRatingStyled(holder.itemView.context)
+            holder.name.text = m.name
             loadGridIcon(holder.icon, m.coverUrl)
             holder.vodNewBadge.isVisible = isVodNewWithin24Hours(m.addedUnixSeconds)
             holder.itemView.setOnKeyListener { _, keyCode, event ->
