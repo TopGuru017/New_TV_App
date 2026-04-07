@@ -181,6 +181,9 @@
     <string name="settings_panel_devices_body">Registered devices and session limits will be listed here.</string>
     <string name="settings_panel_speed_body">Network speed test will run from this section.</string>
     <string name="settings_panel_support_body">Contact support and help articles will open from here.</string>
+    <string name="settings_support_title">customer service 24/7</string>
+    <string name="settings_support_subtitle">scan the QR code to contact with one of our representatives</string>
+    <string name="settings_support_qr_cd">Live support QR code</string>
     <string name="settings_panel_logout_body">Press OK on “Log out” in the list, or use the button below.</string>
     <string name="settings_logout_confirm_title">Log out</string>
     <string name="settings_logout_confirm_message">Sign out and return to the login screen?</string>
