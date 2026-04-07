@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
+import android.os.SystemClock
 import android.text.format.Formatter
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -15,6 +16,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import com.example.new_tv_app.databinding.FragmentSettingsBinding
 import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.AppSessionCleanup
@@ -22,10 +24,16 @@ import com.example.new_tv_app.iptv.IptvCredentials
 import com.example.new_tv_app.iptv.IptvTimeUtils
 import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsFragment : Fragment() {
 
@@ -39,6 +47,7 @@ class SettingsFragment : Fragment() {
     private lateinit var navRows: List<View>
     private lateinit var panels: List<ScrollView>
     private var selectedNavIndex = 0
+    private var speedTestJob: Job? = null
 
     /** Restored when leaving Settings so the rail returns to “content” on RIGHT. */
     private var savedRowSettingsNextRight: Int = View.NO_ID
@@ -151,8 +160,22 @@ class SettingsFragment : Fragment() {
         binding.settingsPanelDisplay.getChildAt(0).isFocusable = true
         binding.settingsPanelLive.getChildAt(0).isFocusable = true
         binding.settingsPanelDevices.getChildAt(0).isFocusable = true
-        binding.settingsPanelSpeed.getChildAt(0).isFocusable = true
         binding.settingsPanelSupport.getChildAt(0).isFocusable = true
+
+        binding.settingsSpeedRunButton.setOnClickListener { runSpeedTest() }
+        binding.settingsSpeedRunButton.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+                    keyCode == KeyEvent.KEYCODE_ENTER ||
+                    keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
+            ) {
+                runSpeedTest()
+                true
+            } else {
+                false
+            }
+        }
+        resetSpeedTestUi()
 
         val supportUrl = SUPPORT_URL
         binding.settingsSupportQrContainer.setOnClickListener { openSupportUrl(supportUrl) }
@@ -194,6 +217,8 @@ class SettingsFragment : Fragment() {
     }
 
     override fun onDestroyView() {
+        speedTestJob?.cancel()
+        speedTestJob = null
         activity?.findViewById<View>(R.id.row_settings)?.let { row ->
             row.nextFocusRightId = savedRowSettingsNextRight
         }
@@ -211,7 +236,7 @@ class SettingsFragment : Fragment() {
         1 -> binding.settingsPanelDisplay.getChildAt(0)
         2 -> binding.settingsPanelLive.getChildAt(0)
         3 -> binding.settingsPanelDevices.getChildAt(0)
-        4 -> binding.settingsPanelSpeed.getChildAt(0)
+        4 -> binding.settingsSpeedRunButton
         5 -> binding.settingsSupportQrContainer
         else -> binding.settingsLogoutButton
     }
@@ -251,7 +276,7 @@ class SettingsFragment : Fragment() {
         binding.settingsPanelDisplay.getChildAt(0).nextFocusLeftId = navId
         binding.settingsPanelLive.getChildAt(0).nextFocusLeftId = navId
         binding.settingsPanelDevices.getChildAt(0).nextFocusLeftId = navId
-        binding.settingsPanelSpeed.getChildAt(0).nextFocusLeftId = navId
+        binding.settingsSpeedRunButton.nextFocusLeftId = navId
         binding.settingsSupportQrContainer.nextFocusLeftId = navId
         binding.settingsLogoutButton.nextFocusLeftId = navId
 
@@ -261,6 +286,146 @@ class SettingsFragment : Fragment() {
     private fun openSupportUrl(url: String) {
         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
+
+    private fun resetSpeedTestUi() {
+        val na = getString(R.string.settings_speed_value_not_available)
+        binding.settingsSpeedStatus.text = getString(R.string.settings_speed_status_idle)
+        binding.settingsSpeedDownload.text = getString(R.string.settings_speed_download_fmt, na)
+        binding.settingsSpeedUpload.text = getString(R.string.settings_speed_upload_fmt, na)
+        binding.settingsSpeedPing.text = getString(R.string.settings_speed_ping_fmt, na)
+        binding.settingsSpeedLastRun.text = getString(R.string.settings_speed_last_run_fmt, na)
+    }
+
+    private fun runSpeedTest() {
+        if (speedTestJob?.isActive == true) return
+        speedTestJob = viewLifecycleOwner.lifecycleScope.launch {
+            setSpeedTestRunningUi(true)
+            val result = withContext(Dispatchers.IO) { performSpeedTest() }
+            if (!isAdded || _binding == null) return@launch
+            applySpeedTestResult(result)
+            setSpeedTestRunningUi(false)
+        }
+    }
+
+    private fun setSpeedTestRunningUi(running: Boolean) {
+        binding.settingsSpeedRunButton.text = if (running) {
+            getString(R.string.settings_speed_running)
+        } else {
+            getString(R.string.settings_speed_run)
+        }
+        binding.settingsSpeedStatus.text = if (running) {
+            getString(R.string.settings_speed_status_running)
+        } else {
+            binding.settingsSpeedStatus.text
+        }
+    }
+
+    private fun applySpeedTestResult(result: SpeedTestResult) {
+        val downloadText = result.downloadMbps?.let {
+            getString(R.string.settings_speed_value_mbps, it)
+        } ?: getString(R.string.settings_speed_value_not_available)
+        val uploadText = result.uploadMbps?.let {
+            getString(R.string.settings_speed_value_mbps, it)
+        } ?: getString(R.string.settings_speed_value_not_available)
+        val pingText = result.pingMs?.let {
+            getString(R.string.settings_speed_value_ms, it)
+        } ?: getString(R.string.settings_speed_value_not_available)
+
+        binding.settingsSpeedDownload.text = getString(R.string.settings_speed_download_fmt, downloadText)
+        binding.settingsSpeedUpload.text = getString(R.string.settings_speed_upload_fmt, uploadText)
+        binding.settingsSpeedPing.text = getString(R.string.settings_speed_ping_fmt, pingText)
+        binding.settingsSpeedLastRun.text = getString(
+            R.string.settings_speed_last_run_fmt,
+            SimpleDateFormat("HH:mm:ss dd-MM-yyyy", Locale.US).apply {
+                timeZone = IptvTimeUtils.ISRAEL_TZ
+            }.format(Date()),
+        )
+        val hasAnyMetric = result.downloadMbps != null || result.uploadMbps != null || result.pingMs != null
+        binding.settingsSpeedStatus.text = getString(
+            if (hasAnyMetric) R.string.settings_speed_status_done else R.string.settings_speed_status_failed,
+        )
+    }
+
+    private fun performSpeedTest(): SpeedTestResult {
+        val pingMs = runCatching {
+            measurePingMs("https://www.google.com/generate_204")
+        }.getOrNull()
+        val downloadMbps = runCatching {
+            measureDownloadMbps(
+                url = "https://speed.cloudflare.com/__down?bytes=4000000",
+                maxBytes = 4_000_000,
+            )
+        }.getOrNull()
+        val uploadMbps = runCatching {
+            measureUploadMbps(
+                url = "https://httpbin.org/post",
+                bytes = 400_000,
+            )
+        }.getOrNull()
+        return SpeedTestResult(downloadMbps = downloadMbps, uploadMbps = uploadMbps, pingMs = pingMs)
+    }
+
+    private fun measurePingMs(url: String): Int {
+        val start = SystemClock.elapsedRealtime()
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 6000
+            readTimeout = 6000
+            requestMethod = "GET"
+            useCaches = false
+        }
+        conn.inputStream.use { it.read() }
+        conn.disconnect()
+        return (SystemClock.elapsedRealtime() - start).toInt().coerceAtLeast(1)
+    }
+
+    private fun measureDownloadMbps(url: String, maxBytes: Int): Double {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000
+            readTimeout = 10000
+            requestMethod = "GET"
+            useCaches = false
+        }
+        val buffer = ByteArray(16 * 1024)
+        var totalRead = 0
+        val start = SystemClock.elapsedRealtime()
+        conn.inputStream.use { input ->
+            while (true) {
+                val toRead = minOf(buffer.size, maxBytes - totalRead)
+                if (toRead <= 0) break
+                val read = input.read(buffer, 0, toRead)
+                if (read <= 0) break
+                totalRead += read
+            }
+        }
+        conn.disconnect()
+        val elapsedSec = ((SystemClock.elapsedRealtime() - start).coerceAtLeast(1L)) / 1000.0
+        return ((totalRead * 8.0) / 1_000_000.0) / elapsedSec
+    }
+
+    private fun measureUploadMbps(url: String, bytes: Int): Double {
+        val payload = ByteArray(bytes) { 0x2A }
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000
+            readTimeout = 10000
+            requestMethod = "POST"
+            doOutput = true
+            useCaches = false
+            setRequestProperty("Content-Type", "application/octet-stream")
+            setFixedLengthStreamingMode(payload.size)
+        }
+        val start = SystemClock.elapsedRealtime()
+        conn.outputStream.use { it.write(payload) }
+        conn.inputStream.use { _ -> }
+        conn.disconnect()
+        val elapsedSec = ((SystemClock.elapsedRealtime() - start).coerceAtLeast(1L)) / 1000.0
+        return ((payload.size * 8.0) / 1_000_000.0) / elapsedSec
+    }
+
+    private data class SpeedTestResult(
+        val downloadMbps: Double?,
+        val uploadMbps: Double?,
+        val pingMs: Int?,
+    )
 
     private fun applyLanguageUi(code: String) {
         val hebrewSelected = code == "he"

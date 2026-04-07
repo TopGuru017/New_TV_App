@@ -1,5 +1,6 @@
 package com.example.new_tv_app
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Build
@@ -23,6 +24,7 @@ import com.bumptech.glide.Glide
 import com.example.new_tv_app.iptv.FavoriteVodStore
 import com.example.new_tv_app.iptv.IptvStreamUrls
 import com.example.new_tv_app.iptv.IptvTimeUtils
+import com.example.new_tv_app.iptv.LastWatchPlaybackPositionStore
 import com.example.new_tv_app.iptv.LastWatchStore
 import com.example.new_tv_app.iptv.SeriesDetails
 import com.example.new_tv_app.iptv.SeriesEpisode
@@ -205,6 +207,9 @@ class VodSeriesFolderFragment : Fragment() {
         if (::favoriteBtn.isInitialized) {
             refreshFavoriteIcon()
         }
+        if (::episodesAdapter.isInitialized) {
+            refreshEpisodeWatchStatus()
+        }
     }
 
     private fun requestFocusFirstEpisode() {
@@ -358,19 +363,70 @@ class VodSeriesFolderFragment : Fragment() {
         // Full notifyDataSetChanged() on seasons would rebind every chip and drop D-pad focus
         // (often to the next focusable, e.g. favorite). Only refresh selected styling.
         seasonsAdapter.refreshSelectionUi(previousSeason, seasonNumber)
+        refreshEpisodeWatchStatus()
+    }
+
+    private fun refreshEpisodeWatchStatus() {
+        val ctx = context ?: return
+        val statuses = HashMap<String, EpisodeWatchStatus>()
+        val vodSeriesResumeKeys = LastWatchStore.readVodSeries(ctx)
+            .mapNotNull { LastWatchStore.resumeCacheKey(it) }
+            .toHashSet()
+
+        cachedDetails?.episodesBySeason
+            ?.values
+            ?.asSequence()
+            ?.flatten()
+            ?.forEach { ep ->
+                val resumeKey = resumeKeyForEpisode(ep) ?: return@forEach
+                val snapshot = LastWatchPlaybackPositionStore.read(ctx, resumeKey)
+                if (snapshot != null && LastWatchPlaybackPositionStore.shouldOfferResume(snapshot)) {
+                    val progressPercent = if (snapshot.durationMs > 0) {
+                        ((snapshot.positionMs * 100L) / snapshot.durationMs).toInt().coerceIn(1, 99)
+                    } else {
+                        1
+                    }
+                    statuses[ep.episodeId] = EpisodeWatchStatus(progressPercent, isCompleted = false)
+                } else if (vodSeriesResumeKeys.contains(resumeKey)) {
+                    statuses[ep.episodeId] = EpisodeWatchStatus(100, isCompleted = true)
+                }
+            }
+        episodesAdapter.updateWatchStatus(statuses)
+    }
+
+    private fun resumeKeyForEpisode(ep: SeriesEpisode): String? {
+        val playbackMovie = buildEpisodeMovie(ep)
+        return LastWatchStore.resumeCacheKeyForPlayback(playbackMovie)
     }
 
     private fun startEpisodePlayback(ep: SeriesEpisode) {
-        val url = IptvStreamUrls.seriesEpisodeUrl(ep.episodeId, ep.containerExtension)
-        val movie = Movie(
-            id = "${seriesId}_${ep.episodeId}".hashCode().toLong(),
-            title = "$seriesName - ${ep.title}",
-            description = ep.plot ?: categoryName,
-            backgroundImageUrl = ep.coverUrl ?: seriesCover,
-            cardImageUrl = ep.coverUrl ?: seriesCover,
-            videoUrl = url,
-            studio = "Season ${ep.seasonNumber}",
-        )
+        val movie = buildEpisodeMovie(ep)
+        val cacheKey = LastWatchStore.resumeCacheKeyForPlayback(movie)
+        if (cacheKey != null) {
+            val snap = LastWatchPlaybackPositionStore.read(requireContext(), cacheKey)
+            if (snap != null && LastWatchPlaybackPositionStore.shouldOfferResume(snap)) {
+                val dialog = AlertDialog.Builder(requireContext())
+                    .setTitle(R.string.last_watch_resume_title)
+                    .setMessage(R.string.last_watch_resume_message)
+                    .setPositiveButton(R.string.last_watch_resume_resume) { _, _ ->
+                        launchEpisodePlayback(ep, movie, snap.positionMs)
+                    }
+                    .setNegativeButton(R.string.last_watch_resume_restart) { _, _ ->
+                        LastWatchPlaybackPositionStore.remove(requireContext(), cacheKey)
+                        launchEpisodePlayback(ep, movie, null)
+                    }
+                    .create()
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.requestFocus()
+                }
+                dialog.show()
+                return
+            }
+        }
+        launchEpisodePlayback(ep, movie, null)
+    }
+
+    private fun launchEpisodePlayback(ep: SeriesEpisode, movie: Movie, initialPositionMs: Long?) {
         LastWatchStore.addVodSeries(
             context = requireContext(),
             playedUnixSeconds = IptvTimeUtils.nowIsraelSeconds(),
@@ -380,7 +436,23 @@ class VodSeriesFolderFragment : Fragment() {
         startActivity(
             Intent(requireContext(), PlaybackActivity::class.java).apply {
                 putExtra(DetailsActivity.MOVIE, movie)
+                if (initialPositionMs != null) {
+                    putExtra(PlaybackActivity.INITIAL_POSITION_MS, initialPositionMs)
+                }
             },
+        )
+    }
+
+    private fun buildEpisodeMovie(ep: SeriesEpisode): Movie {
+        val url = IptvStreamUrls.seriesEpisodeUrl(ep.episodeId, ep.containerExtension)
+        return Movie(
+            id = "${seriesId}_${ep.episodeId}".hashCode().toLong(),
+            title = "$seriesName - ${ep.title}",
+            description = ep.plot ?: categoryName,
+            backgroundImageUrl = ep.coverUrl ?: seriesCover,
+            cardImageUrl = ep.coverUrl ?: seriesCover,
+            videoUrl = url,
+            studio = "Season ${ep.seasonNumber}",
         )
     }
 
@@ -557,6 +629,12 @@ private class EpisodesAdapter(
     private val onEpisodePlay: (SeriesEpisode) -> Unit,
     private val onFirstRowDpadUp: () -> Unit,
 ) : RecyclerView.Adapter<EpisodesAdapter.VH>() {
+    private var watchStatusByEpisodeId: Map<String, EpisodeWatchStatus> = emptyMap()
+
+    fun updateWatchStatus(statusMap: Map<String, EpisodeWatchStatus>) {
+        watchStatusByEpisodeId = statusMap
+        notifyDataSetChanged()
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
         val view = LayoutInflater.from(parent.context)
@@ -579,6 +657,20 @@ private class EpisodesAdapter(
             holder.thumbnail.setImageDrawable(null)
         } else {
             Glide.with(holder.thumbnail).load(thumbUrl).centerCrop().into(holder.thumbnail)
+        }
+        val watchStatus = watchStatusByEpisodeId[episode.episodeId]
+        if (watchStatus == null) {
+            holder.watchBadge.isVisible = false
+            holder.watchProgress.isVisible = false
+        } else {
+            holder.watchBadge.isVisible = true
+            holder.watchProgress.isVisible = true
+            holder.watchProgress.progress = watchStatus.progressPercent.coerceIn(1, 100)
+            holder.watchBadge.text = if (watchStatus.isCompleted) {
+                holder.itemView.context.getString(R.string.vod_series_episode_watched)
+            } else {
+                "${watchStatus.progressPercent}%"
+            }
         }
         holder.itemView.setOnFocusChangeListener { _, hasFocus ->
             if (hasFocus) onEpisodeFocused(episode)
@@ -610,5 +702,12 @@ private class EpisodesAdapter(
         val thumbnail: ImageView = itemView.findViewById(R.id.episode_thumbnail)
         val number: TextView = itemView.findViewById(R.id.episode_number)
         val title: TextView = itemView.findViewById(R.id.episode_title)
+        val watchBadge: TextView = itemView.findViewById(R.id.episode_watch_badge)
+        val watchProgress: ProgressBar = itemView.findViewById(R.id.episode_watch_progress)
     }
 }
+
+private data class EpisodeWatchStatus(
+    val progressPercent: Int,
+    val isCompleted: Boolean,
+)

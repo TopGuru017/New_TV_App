@@ -152,6 +152,7 @@
     <string name="vod_series_order_asc">↑ Oldest first</string>
     <string name="vod_series_season_label">Season %1$s</string>
     <string name="vod_series_episode_label">Episode %1$d</string>
+    <string name="vod_series_episode_watched">WATCHED</string>
 
     <!-- Settings (in-app) -->
     <string name="settings_title">Settings</string>
@@ -180,6 +181,19 @@
     <string name="settings_panel_live_body">Live TV defaults (buffer, start channel) will be available here.</string>
     <string name="settings_panel_devices_body">Registered devices and session limits will be listed here.</string>
     <string name="settings_panel_speed_body">Network speed test will run from this section.</string>
+    <string name="settings_speed_run">Run speed test</string>
+    <string name="settings_speed_running">Testing…</string>
+    <string name="settings_speed_status_idle">Status: Ready</string>
+    <string name="settings_speed_status_running">Status: Running speed test…</string>
+    <string name="settings_speed_status_done">Status: Completed</string>
+    <string name="settings_speed_status_failed">Status: Failed. Please try again.</string>
+    <string name="settings_speed_download_fmt">Download: %1$s</string>
+    <string name="settings_speed_upload_fmt">Upload: %1$s</string>
+    <string name="settings_speed_ping_fmt">Ping: %1$s</string>
+    <string name="settings_speed_last_run_fmt">Last tested: %1$s</string>
+    <string name="settings_speed_value_not_available">N/A</string>
+    <string name="settings_speed_value_mbps">%1$.1f Mbps</string>
+    <string name="settings_speed_value_ms">%1$d ms</string>
     <string name="settings_panel_support_body">Contact support and help articles will open from here.</string>
     <string name="settings_support_title">customer service 24/7</string>
     <string name="settings_support_subtitle">scan the QR code to contact with one of our representatives</string>

@@ -25,6 +25,44 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             tools:background="#333" />
+
+        <ProgressBar
+            android:id="@+id/episode_watch_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="0dp"
+            android:layout_height="4dp"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginBottom="6dp"
+            android:indeterminate="false"
+            android:max="100"
+            android:progress="0"
+            android:progressBackgroundTint="#55000000"
+            android:progressTint="@color/sidebar_accent_cyan"
+            android:visibility="gone"
+            app:layout_constraintBottom_toBottomOf="@id/episode_thumbnail"
+            app:layout_constraintEnd_toEndOf="@id/episode_thumbnail"
+            app:layout_constraintStart_toStartOf="@id/episode_thumbnail"
+            />
+
+        <TextView
+            android:id="@+id/episode_watch_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/bg_series_episode_watched_badge"
+            android:paddingStart="8dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="2dp"
+            android:textColor="@color/sidebar_text_primary"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="@id/episode_thumbnail"
+            app:layout_constraintTop_toTopOf="@id/episode_thumbnail"
+            tools:text="WATCHED" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 
     <TextView
