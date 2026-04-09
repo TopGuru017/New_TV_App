@@ -33,15 +33,12 @@ import com.example.new_tv_app.playback.TimeshiftAwareDataSourceFactory
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
-import com.bumptech.glide.load.MultiTransformation
-import com.bumptech.glide.load.resource.bitmap.CenterCrop
-import com.bumptech.glide.load.resource.bitmap.RoundedCorners
-import com.bumptech.glide.request.RequestOptions
 import androidx.lifecycle.lifecycleScope
 import com.example.new_tv_app.iptv.EpgListing
 import com.example.new_tv_app.iptv.FavoriteVodStore
@@ -61,15 +58,14 @@ import kotlinx.coroutines.withContext
 private data class PlaybackAttempt(val url: String, val bare: Boolean)
 
 /**
- * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD: DPAD left/right opens
- * the horizontal chapter strip; only then is the bottom overlay (times + progress) shown. Panel **live** URLs
- * ([IptvStreamUrls.isPanelLiveStreamUrl]): no chapter strip or seek — live is not movable.
+ * Plays VOD and live IPTV via ExoPlayer. No on-screen chrome while playing. Seekable VOD / archive: DPAD
+ * left/right shows the bottom timeline (progress bar + times) and seeks in fixed steps; OK dismisses the bar.
+ * Panel **live** URLs ([IptvStreamUrls.isPanelLiveStreamUrl]): no seek — live is not movable.
  * Records catch-up (intent carries [PlaybackActivity.RECORDS_DAY_LISTINGS]): DPAD up/down on video opens a bottom
  * overlay (VOD-style card + footer); playback keeps running while browsing listings. DPAD up/down on the thumbnail
- * browses listings (▲/▼ flash cyan). At the first
- * listing, up does nothing; at the last, down does nothing. OK on the thumbnail applies the selection (if changed)
- * and dismisses; DPAD left/back closes. Left/right opens the chapter strip; moving between chapter cards
- * keeps playback running (same as timeshift/catch-up).
+ * browses listings (▲/▼ flash cyan). At the first listing, up does nothing; at the last, down does nothing.
+ * OK on the thumbnail applies the selection (if changed) and dismisses; DPAD left/back closes. Left/right
+ * seeks within the programme using the same timeline overlay.
  */
 @UnstableApi
 class PlaybackVideoFragment : Fragment() {
@@ -85,7 +81,6 @@ class PlaybackVideoFragment : Fragment() {
 
     private lateinit var videoLayout: PlayerView
     private lateinit var controlsOverlay: View
-    private lateinit var trickRv: RecyclerView
     private lateinit var trickTimelineRow: View
     private lateinit var timeCurrent: TextView
     private lateinit var timeTotal: TextView
@@ -101,14 +96,9 @@ class PlaybackVideoFragment : Fragment() {
     private lateinit var recordsInfoDescription: TextView
     private lateinit var recordsInfoMeta: TextView
 
-    private val trickSlots = mutableListOf<TrickSlot>()
-    private lateinit var trickAdapter: TrickStripAdapter
     private var posterUrl: String? = null
-    /** Last duration used to build trick strip; rebuild when ExoPlayer reports a new length. */
-    private var trickStripBuiltForLengthMs: Long = -1L
-    /** Seek chapter cards visible (DPAD left/right on video). Playback keeps running while browsing chapters. */
-    private var trickStripUserVisible: Boolean = false
-    private var selectedTrickIndex: Int = 0
+    /** Bottom timeline (progress + times) visible while seeking with DPAD left/right. */
+    private var seekTimelineUserVisible: Boolean = false
 
     private var recordsArchiveStreamId: String? = null
     private val recordsDayListings = mutableListOf<EpgListing>()
@@ -262,7 +252,6 @@ class PlaybackVideoFragment : Fragment() {
 
         videoLayout = view.findViewById(R.id.vlc_video_layout)
         controlsOverlay = view.findViewById(R.id.playback_controls_overlay)
-        trickRv = view.findViewById(R.id.playback_trick_rv)
         trickTimelineRow = view.findViewById(R.id.playback_timeline_row)
         timeCurrent = view.findViewById(R.id.playback_time_current)
         timeTotal = view.findViewById(R.id.playback_time_total)
@@ -279,10 +268,6 @@ class PlaybackVideoFragment : Fragment() {
         recordsInfoMeta = view.findViewById(R.id.playback_records_info_meta)
         setupRecordsColumnPanelKeys()
 
-        trickAdapter = TrickStripAdapter(
-            initialPosterUrl = posterUrl,
-            slots = trickSlots,
-        )
         recordsInfoOverlay.isVisible = false
 
         // Bind live info overlay views
@@ -347,11 +332,6 @@ class PlaybackVideoFragment : Fragment() {
                 else -> false
             }
         }
-
-        trickRv.layoutManager = LinearLayoutManager(requireContext(), LinearLayoutManager.HORIZONTAL, false)
-        trickRv.setHasFixedSize(true)
-        trickRv.itemAnimator = null
-        trickRv.adapter = trickAdapter
 
         videoLayout.doOnLayout { vl ->
             Log.d(
@@ -426,22 +406,14 @@ class PlaybackVideoFragment : Fragment() {
                         return@setOnKeyListener true
                     }
                     if (isVodPlaybackMode()) {
-                        if (trickStripUserVisible || (trickRv.isVisible && trickAdapter.itemCount > 0)) {
-                            trickStripUserVisible = false
-                            trickRv.isVisible = false
+                        if (seekTimelineUserVisible) {
+                            seekTimelineUserVisible = false
+                            controlsOverlay.isVisible = false
                             mediaPlayer?.play()
                             updatePlaybackControlsUi()
                         }
                         showVodInfoOverlay()
                         return@setOnKeyListener true
-                    }
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        if (!IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl) &&
-                            trickRv.isVisible && trickAdapter.itemCount > 0
-                        ) {
-                            focusTrickNearCurrentTime()
-                            return@setOnKeyListener true
-                        }
                     }
                     false
                 }
@@ -467,18 +439,8 @@ class PlaybackVideoFragment : Fragment() {
                     if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
                         return@setOnKeyListener true
                     }
-                    val p = mediaPlayer ?: return@setOnKeyListener false
-                    val len = mediaLengthMs(p)
-                    val seekable = p.isCurrentMediaItemSeekable && len > 1_000L && trickSlots.isNotEmpty()
-                    if (!seekable) return@setOnKeyListener false
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
-                    if (!trickStripUserVisible || !trickRv.isVisible) {
-                        if (!openTrickStripForSeeking(initialDelta = delta)) return@setOnKeyListener false
-                    } else {
-                        shiftSelectedTrick(delta)
-                    }
-                    val slot = trickSlots.getOrNull(selectedTrickIndex)
-                    if (slot != null) seekTrickCard(slot.startMs)
+                    if (!showSeekTimelineAndStep(delta)) return@setOnKeyListener false
                     true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
@@ -514,9 +476,8 @@ class PlaybackVideoFragment : Fragment() {
                     val p = mediaPlayer ?: return@setOnKeyListener false
                     if (recordsColumnUserVisible) {
                         closeRecordsColumnAndResume()
-                    } else if (trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()) {
-                        val slot = trickSlots[selectedTrickIndex.coerceIn(0, trickSlots.lastIndex)]
-                        activateTrickCardAndResume(slot.startMs)
+                    } else if (seekTimelineUserVisible) {
+                        dismissSeekTimelineOverlay()
                     } else {
                         if (p.isPlaying) p.pause() else p.play()
                     }
@@ -536,14 +497,7 @@ class PlaybackVideoFragment : Fragment() {
             viewLifecycleOwner.lifecycleScope,
         )
         timeshiftDataSourceFactory = tsFactory
-        val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
-                120_000, // max 2 min — keeps enough segments pre-fetched for catch-up/timeshift
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
-            )
-            .build()
+        val loadControl = buildLoadControlForInitialUrl(url)
         val renderersFactory =
             DefaultRenderersFactory(requireContext())
                 .setEnableDecoderFallback(true)
@@ -595,7 +549,7 @@ class PlaybackVideoFragment : Fragment() {
                     Log.d(TAG, "isPlaying=$isPlaying")
                     if (isPlaying) {
                         view.post {
-                            rebuildTrickStripIfNeeded()
+                            refreshSeekUiAfterPlayerStateChange()
                             startProgressTicker()
                         }
                     }
@@ -616,7 +570,7 @@ class PlaybackVideoFragment : Fragment() {
                             pendingInitialSeekMs = C.TIME_UNSET
                             runCatching { player.seekTo(pending) }
                                 .onFailure { Log.w(TAG, "initial seek failed", it) }
-                            view.post { rebuildTrickStripIfNeeded() }
+                            view.post { refreshSeekUiAfterPlayerStateChange() }
                         }
                     }
                     if (playbackState == Player.STATE_ENDED) {
@@ -628,7 +582,7 @@ class PlaybackVideoFragment : Fragment() {
                             mediaPlayer?.pause()
                         }
                     }
-                    view.post { rebuildTrickStripIfNeeded() }
+                    view.post { refreshSeekUiAfterPlayerStateChange() }
                 }
             },
         )
@@ -689,12 +643,32 @@ class PlaybackVideoFragment : Fragment() {
         v.post(progressTicker)
     }
 
-    /** Seek to chapter, dismiss strip, resume playback, return focus to video. */
-    private fun activateTrickCardAndResume(ms: Long) {
+    /**
+     * Shows the bottom timeline and seeks by [delta] steps of [SEEK_STEP_MS] each. Closes the records listing
+     * overlay when used from the main video surface. Returns false if the stream is not seekable.
+     */
+    private fun showSeekTimelineAndStep(delta: Int): Boolean {
+        if (::recordsColumnScrollUp.isInitialized) {
+            recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
+        }
+        recordsColumnUserVisible = false
+        recordsInfoOverlay.isVisible = false
+        val p = mediaPlayer ?: return false
+        val len = mediaLengthMs(p)
+        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L
+        if (!seekable) return false
+        seekTimelineUserVisible = true
+        val step = SEEK_STEP_MS * delta.toLong()
+        val target = (p.currentPosition + step).coerceIn(0L, (len - 1L).coerceAtLeast(0L))
+        runCatching { p.seekTo(target) }.onFailure { Log.w(TAG, "seek failed", it) }
+        videoLayout.requestFocus()
+        updatePlaybackControlsUi()
+        return true
+    }
+
+    private fun dismissSeekTimelineOverlay() {
         val p = mediaPlayer ?: return
-        runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
-        trickStripUserVisible = false
-        trickRv.isVisible = false
+        seekTimelineUserVisible = false
         recordsColumnUserVisible = false
         recordsInfoOverlay.isVisible = false
         if (!p.isPlaying) p.play()
@@ -702,53 +676,12 @@ class PlaybackVideoFragment : Fragment() {
         updatePlaybackControlsUi()
     }
 
-    /** Seeks to [ms] with the trick strip open; does not pause (matches records / timeshift behaviour). */
-    private fun seekTrickCard(ms: Long) {
+    private fun refreshSeekUiAfterPlayerStateChange() {
         val p = mediaPlayer ?: return
-        runCatching { p.seekTo(ms) }.onFailure { Log.w(TAG, "seek failed", it) }
-        videoLayout.requestFocus()
-        updatePlaybackControlsUi()
-    }
-
-    private fun focusTrickNearCurrentTime() {
-        val p = mediaPlayer ?: return
-        val len = mediaLengthMs(p)
-        if (len <= 0L || trickSlots.isEmpty()) return
-        val t = p.currentPosition.coerceIn(0L, len)
-        val n = trickSlots.size
-        val idx = ((t * n) / len).toInt().coerceIn(0, n - 1)
-        selectedTrickIndex = idx
-        centerSelectedTrickCard()
-    }
-
-    private fun syncSelectedTrickToCurrentTime() {
-        val p = mediaPlayer ?: return
-        val len = mediaLengthMs(p)
-        if (len <= 0L || trickSlots.isEmpty()) return
-        val t = p.currentPosition.coerceIn(0L, len)
-        val n = trickSlots.size
-        selectedTrickIndex = ((t * n) / len).toInt().coerceIn(0, n - 1)
-        trickAdapter.setSelectedIndex(selectedTrickIndex)
-    }
-
-    private fun shiftSelectedTrick(delta: Int) {
-        if (trickSlots.isEmpty()) return
-        selectedTrickIndex = (selectedTrickIndex + delta).coerceIn(0, trickSlots.lastIndex)
-        centerSelectedTrickCard()
-        updatePlaybackControlsUi()
-    }
-
-    private fun centerSelectedTrickCard() {
-        if (trickSlots.isEmpty()) return
-        val lm = trickRv.layoutManager as? LinearLayoutManager ?: return
-        trickAdapter.setSelectedIndex(selectedTrickIndex)
-        val cardW = resources.getDimensionPixelSize(R.dimen.playback_trick_card_width)
-        val offset = ((trickRv.width - cardW) / 2).coerceAtLeast(0)
-        lm.scrollToPositionWithOffset(selectedTrickIndex, offset)
-        trickRv.post {
-            val postOffset = ((trickRv.width - cardW) / 2).coerceAtLeast(0)
-            lm.scrollToPositionWithOffset(selectedTrickIndex, postOffset)
+        if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
+            seekTimelineUserVisible = false
         }
+        updatePlaybackControlsUi()
     }
 
     private fun toggleRecordsColumn() {
@@ -760,8 +693,7 @@ class PlaybackVideoFragment : Fragment() {
         if (!IptvStreamUrls.isTimeshiftUrl(currentPlaybackUrl) &&
             (recordsDayListings.isEmpty() || recordsArchiveStreamId.isNullOrEmpty())
         ) return
-        trickStripUserVisible = false
-        trickRv.isVisible = false
+        seekTimelineUserVisible = false
         recordsColumnUserVisible = true
         recordsInfoOverlay.isVisible = true
         syncRecordsColumnListingIndexWithPlayback()
@@ -983,37 +915,6 @@ class PlaybackVideoFragment : Fragment() {
         bindRecordsColumnPanelUi()
     }
 
-    /**
-     * Dismisses records overlay, shows horizontal chapter strip, and moves chapter selection by [initialDelta]
-     * when requested (-1 left, +1 right). Returns false if stream is not seekable.
-     */
-    private fun openTrickStripForSeeking(initialDelta: Int = 0): Boolean {
-        if (::recordsColumnScrollUp.isInitialized) {
-            recordsColumnScrollUp.removeCallbacks(recordsArrowColorResetRunnable)
-        }
-        recordsColumnUserVisible = false
-        recordsInfoOverlay.isVisible = false
-        val p = mediaPlayer ?: return false
-        val len = mediaLengthMs(p)
-        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L
-        if (!seekable) return false
-        if (trickSlots.isEmpty()) {
-            rebuildTrickStripIfNeeded()
-        }
-        if (trickSlots.isEmpty()) return false
-        trickStripUserVisible = true
-        trickRv.isVisible = true
-        syncSelectedTrickToCurrentTime()
-        if (initialDelta != 0) {
-            shiftSelectedTrick(initialDelta)
-        } else {
-            centerSelectedTrickCard()
-            updatePlaybackControlsUi()
-        }
-        videoLayout.requestFocus()
-        return true
-    }
-
     private fun setupRecordsColumnPanelKeys() {
         val videoFocusId = R.id.vlc_video_layout
         recordsColumnThumb.nextFocusLeftId = videoFocusId
@@ -1043,10 +944,7 @@ class PlaybackVideoFragment : Fragment() {
                 KeyEvent.KEYCODE_DPAD_RIGHT,
                 -> {
                     val delta = if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) -1 else 1
-                    if (openTrickStripForSeeking(initialDelta = delta)) {
-                        val slot = trickSlots.getOrNull(selectedTrickIndex)
-                        if (slot != null) seekTrickCard(slot.startMs)
-                    } else {
+                    if (!showSeekTimelineAndStep(delta)) {
                         closeRecordsColumnAndResume()
                     }
                     true
@@ -1085,10 +983,7 @@ class PlaybackVideoFragment : Fragment() {
         val url = IptvStreamUrls.timeshiftStreamUrl(sid, listing.startUnix, listing.endUnix, listing.startRaw, listing.endRaw)
         currentArchiveListingId = listing.startUnix xor listing.endUnix
         posterUrl = sequenceOf(listing.imageUrl, posterUrl).firstOrNull { !it.isNullOrBlank() }
-        trickAdapter.setPosterUrl(posterUrl)
-        trickStripBuiltForLengthMs = -1L
-        trickStripUserVisible = false
-        trickRv.isVisible = false
+        seekTimelineUserVisible = false
         runCatching { player.stop() }
         resetPlaybackAttemptStateForNewSeed(url)
         startPlayback(player, url, bare = false)
@@ -1323,8 +1218,7 @@ class PlaybackVideoFragment : Fragment() {
         // Switch player to new live stream
         val newUrl = IptvStreamUrls.liveStreamUrl(stream.streamId)
         val player = mediaPlayer ?: return
-        trickStripUserVisible = false
-        trickRv.isVisible = false
+        seekTimelineUserVisible = false
         runCatching { player.stop() }
         resetPlaybackAttemptStateForNewSeed(newUrl)
         startPlayback(player, newUrl, bare = false)
@@ -1445,85 +1339,16 @@ class PlaybackVideoFragment : Fragment() {
 
     // ════════════════════════════════════════════════════════════════════════════
 
-    private fun rebuildTrickStripIfNeeded() {
-        val p = mediaPlayer ?: return
-        if (IptvStreamUrls.isPanelLiveStreamUrl(currentPlaybackUrl)) {
-            trickStripBuiltForLengthMs = -1L
-            trickStripUserVisible = false
-            trickRv.isVisible = false
-            trickSlots.clear()
-            trickAdapter.notifyDataSetChanged()
-            timeTotal.text = getString(R.string.playback_live)
-            updatePlaybackControlsUi()
-            return
-        }
-        val len = mediaLengthMs(p)
-        val seekable = p.isCurrentMediaItemSeekable && len > 1_000L
-
-        if (seekable) {
-            if (len != trickStripBuiltForLengthMs) {
-                trickStripBuiltForLengthMs = len
-                trickSlots.clear()
-                val step = TRICK_SLOT_STEP_MS
-                val slotsCount = ((len + step - 1L) / step).toInt().coerceAtLeast(1)
-                for (i in 0 until slotsCount) {
-                    val start = (i * step).coerceAtMost((len - 1L).coerceAtLeast(0L))
-                    val label = formatPlaybackTimeMs(start)
-                    val thumb = thumbnailUrlForTrickSlot(start, step, len)
-                    trickSlots.add(TrickSlot(start, label, thumb))
-                }
-                trickAdapter.notifyDataSetChanged()
-            }
-            trickRv.isVisible = trickStripUserVisible && trickSlots.isNotEmpty()
-            if (trickRv.isVisible && trickSlots.isNotEmpty()) {
-                selectedTrickIndex = selectedTrickIndex.coerceIn(0, trickSlots.lastIndex)
-                centerSelectedTrickCard()
-            }
-            timeTotal.text = formatPlaybackTimeMs(len)
-        } else {
-            trickStripBuiltForLengthMs = -1L
-            trickStripUserVisible = false
-            trickRv.isVisible = false
-            trickSlots.clear()
-            trickAdapter.notifyDataSetChanged()
-            timeTotal.text = getString(R.string.playback_live)
-        }
-        updatePlaybackControlsUi()
-    }
-
-    private fun currentArchiveAnchorListing(): EpgListing? {
-        if (recordsArchiveStreamId.isNullOrEmpty() || recordsDayListings.isEmpty()) return null
-        return recordsDayListings.find { (it.startUnix xor it.endUnix) == currentArchiveListingId }
-    }
-
-    /**
-     * Thumbnail for a seek chapter: EPG image at that offset when archive day list is available,
-     * else [posterUrl] (VOD / fallback).
-     */
-    private fun thumbnailUrlForTrickSlot(startOffsetMs: Long, stepMs: Long, mediaLenMs: Long): String? {
-        val fallback = posterUrl?.trim()?.takeIf { it.isNotEmpty() }
-        val anchor = currentArchiveAnchorListing() ?: return fallback
-        val halfStep = (stepMs / 2L).coerceAtLeast(0L)
-        val midOffset = (startOffsetMs + halfStep).coerceIn(0L, (mediaLenMs - 1L).coerceAtLeast(0L))
-        val wallSec = anchor.startUnix + midOffset / 1000L
-        val hit = recordsDayListings.find { wallSec >= it.startUnix && wallSec < it.endUnix }
-        val fromListing = hit?.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
-            ?: anchor.imageUrl?.trim()?.takeIf { it.isNotEmpty() }
-        return fromListing ?: fallback
-    }
-
     private fun updatePlaybackControlsUi() {
         val p = mediaPlayer ?: return
         val len = mediaLengthMs(p)
         val cur = p.currentPosition.coerceAtLeast(0L)
-        val stripShowing = trickStripUserVisible && trickRv.isVisible && trickSlots.isNotEmpty()
         val seekableVod = p.isCurrentMediaItemSeekable && len > 1_000L
-        val showChrome = stripShowing && seekableVod
+        val timelineShowing = seekTimelineUserVisible && seekableVod
 
-        controlsOverlay.isVisible = showChrome
-        trickTimelineRow.isVisible = false
-        if (!showChrome) {
-            progressBar.isVisible = false
+        controlsOverlay.isVisible = timelineShowing
+        trickTimelineRow.isVisible = timelineShowing
+        if (!timelineShowing) {
             progressBar.progress = 0
             return
         }
@@ -1827,6 +1652,37 @@ class PlaybackVideoFragment : Fragment() {
             ?.setDefaultRequestProperties(emptyMap())
     }
 
+    /**
+     * VOD/series: smaller "buffer before play" targets so ExoPlayer reaches [Player.STATE_READY] /
+     * first frame sooner. Timeshift and live keep defaults suited to sliding-window HLS and live edge.
+     */
+    private fun buildLoadControlForInitialUrl(url: String): LoadControl {
+        val vodFastStart =
+            isVodOrSeriesUrl(url) &&
+                !IptvStreamUrls.isTimeshiftUrl(url) &&
+                !IptvStreamUrls.isPanelLiveStreamUrl(url)
+        return if (vodFastStart) {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    20_000,
+                    120_000,
+                    1_200,
+                    2_500,
+                )
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build()
+        } else {
+            DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                    120_000,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
+                    DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS,
+                )
+                .build()
+        }
+    }
+
     private fun isVodOrSeriesUrl(url: String): Boolean {
         val path = Uri.parse(url).path.orEmpty()
         return path.contains("/movie/", ignoreCase = true) || path.contains("/series/", ignoreCase = true)
@@ -1839,7 +1695,8 @@ class PlaybackVideoFragment : Fragment() {
 
     private companion object {
         const val TAG = "PlaybackExo"
-        const val TRICK_SLOT_STEP_MS = 30_000L
+        /** One DPAD left/right step while the seek timeline is visible. */
+        const val SEEK_STEP_MS = 30_000L
         /** 24 h in ms — larger than any realistic recording, so ExoPlayer always starts at the
          *  oldest available segment of a live-type timeshift HLS stream rather than the live edge. */
         const val TIMESHIFT_LIVE_TARGET_OFFSET_MS = 24L * 60 * 60 * 1000
@@ -1883,80 +1740,5 @@ class PlaybackVideoFragment : Fragment() {
             Log.i(TAG, "title=${title ?: "?"} host=${u.host} scheme=${u.scheme} lastSegment=$last (full URL omitted — contains credentials)")
         }
 
-    }
-}
-
-private data class TrickSlot(
-    val startMs: Long,
-    val label: String,
-    /** Poster / EPG still for this segment; null uses placeholder in UI. */
-    val thumbnailUrl: String?,
-)
-
-private class TrickStripAdapter(
-    initialPosterUrl: String?,
-    private val slots: List<TrickSlot>,
-) : RecyclerView.Adapter<TrickStripAdapter.VH>() {
-
-    private var posterUrl: String? = initialPosterUrl
-    private var selectedIndex: Int = 0
-
-    fun setPosterUrl(url: String?) {
-        posterUrl = url
-        notifyDataSetChanged()
-    }
-
-    fun setSelectedIndex(index: Int) {
-        if (slots.isEmpty()) {
-            selectedIndex = 0
-            return
-        }
-        val safe = index.coerceIn(0, slots.lastIndex)
-        if (safe == selectedIndex) return
-        val old = selectedIndex
-        selectedIndex = safe
-        if (old in slots.indices) notifyItemChanged(old)
-        notifyItemChanged(selectedIndex)
-    }
-
-    override fun getItemCount(): Int = slots.size
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
-        val v = LayoutInflater.from(parent.context)
-            .inflate(R.layout.item_playback_trick_card, parent, false)
-        return VH(v)
-    }
-
-    override fun onBindViewHolder(holder: VH, position: Int) {
-        val slot = slots[position]
-        holder.time.text = slot.label
-        holder.itemView.contentDescription =
-            holder.itemView.context.getString(R.string.playback_cd_trick_seek, slot.label)
-
-        val url = slot.thumbnailUrl?.trim()?.takeIf { it.isNotEmpty() }
-            ?: posterUrl?.trim()?.takeIf { it.isNotEmpty() }
-        if (url.isNullOrEmpty()) {
-            Glide.with(holder.poster).clear(holder.poster)
-            holder.poster.scaleType = ScaleType.CENTER_INSIDE
-            holder.poster.setImageResource(R.drawable.ic_playback_timeslot_placeholder)
-        } else {
-            holder.poster.scaleType = ScaleType.CENTER_CROP
-            val radius = holder.itemView.resources.getDimensionPixelSize(R.dimen.playback_trick_card_corner_radius)
-            val opts = RequestOptions().transform(
-                MultiTransformation(CenterCrop(), RoundedCorners(radius)),
-            )
-            Glide.with(holder.poster)
-                .load(url)
-                .placeholder(R.drawable.ic_playback_timeslot_placeholder)
-                .error(R.drawable.ic_playback_timeslot_placeholder)
-                .apply(opts)
-                .into(holder.poster)
-        }
-        holder.itemView.isSelected = position == selectedIndex
-    }
-
-    class VH(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        val poster: ImageView = itemView.findViewById(R.id.playback_trick_poster)
-        val time: TextView = itemView.findViewById(R.id.playback_trick_time)
     }
 }

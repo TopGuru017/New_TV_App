@@ -17,7 +17,7 @@
         app:show_buffering="never"
         app:use_controller="false" />
 
-    <!-- Bottom trick-play + timeline (VOD / seekable streams) -->
+    <!-- Bottom timeline (VOD / seekable streams): shown while seeking with DPAD left/right -->
     <LinearLayout
         android:id="@+id/playback_controls_overlay"
         android:layout_width="match_parent"
@@ -31,14 +31,6 @@
         android:paddingBottom="@dimen/playback_overlay_bottom_padding"
         android:visibility="gone"
         tools:visibility="visible">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/playback_trick_rv"
-            android:layout_width="match_parent"
-            android:layout_height="@dimen/playback_trick_card_height"
-            android:clipToPadding="false"
-            android:overScrollMode="never"
-            android:paddingBottom="4dp" />
 
         <LinearLayout
             android:id="@+id/playback_timeline_row"
