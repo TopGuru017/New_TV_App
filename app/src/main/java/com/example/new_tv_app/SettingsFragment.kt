@@ -3,7 +3,6 @@ package com.example.new_tv_app
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
 import android.os.SystemClock
@@ -26,7 +25,6 @@ import com.example.new_tv_app.ui.sidebar.IptvSidebarView
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -177,26 +175,6 @@ class SettingsFragment : Fragment() {
         }
         resetSpeedTestUi()
 
-        val supportUrl = SUPPORT_URL
-        binding.settingsSupportQrContainer.setOnClickListener { openSupportUrl(supportUrl) }
-        binding.settingsSupportQrContainer.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN &&
-                (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-                    keyCode == KeyEvent.KEYCODE_ENTER ||
-                    keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
-            ) {
-                openSupportUrl(supportUrl)
-                true
-            } else {
-                false
-            }
-        }
-        val encodedSupportUrl = URLEncoder.encode(supportUrl, "UTF-8")
-        val qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=512x512&margin=0&data=$encodedSupportUrl"
-        Glide.with(this)
-            .load(qrUrl)
-            .into(binding.settingsSupportQrImage)
-
         binding.settingsLogoutButton.setOnClickListener { showLogoutDialog() }
         binding.settingsLogoutButton.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN &&
@@ -237,7 +215,7 @@ class SettingsFragment : Fragment() {
         2 -> binding.settingsPanelLive.getChildAt(0)
         3 -> binding.settingsPanelDevices.getChildAt(0)
         4 -> binding.settingsSpeedRunButton
-        5 -> binding.settingsSupportQrContainer
+        5 -> binding.settingsPanelSupport.getChildAt(0)
         else -> binding.settingsLogoutButton
     }
 
@@ -277,14 +255,10 @@ class SettingsFragment : Fragment() {
         binding.settingsPanelLive.getChildAt(0).nextFocusLeftId = navId
         binding.settingsPanelDevices.getChildAt(0).nextFocusLeftId = navId
         binding.settingsSpeedRunButton.nextFocusLeftId = navId
-        binding.settingsSupportQrContainer.nextFocusLeftId = navId
+        binding.settingsPanelSupport.getChildAt(0).nextFocusLeftId = navId
         binding.settingsLogoutButton.nextFocusLeftId = navId
 
         updateHorizontalFocusChain()
-    }
-
-    private fun openSupportUrl(url: String) {
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     }
 
     private fun resetSpeedTestUi() {
@@ -507,6 +481,5 @@ class SettingsFragment : Fragment() {
         private const val KEY_RECORDS_ORDER = "records_order"
         private const val KEY_UPDATE_NOTIFICATIONS = "update_notifications"
         private const val STATE_NAV_INDEX = "settings_nav_index"
-        private const val SUPPORT_URL = "https://sdarottv.net/"
     }
 }
